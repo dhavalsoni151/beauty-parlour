@@ -203,16 +203,16 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
 
     setState(() { _isLoading = true; _statusMessage = ''; });
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['json'],
       );
-      if (result == null || result.files.single.path == null) {
+      if (result == null || result.path == null) {
         setState(() => _isLoading = false);
         return;
       }
 
-      final file = File(result.files.single.path!);
+      final file = File(result.path!);
       final jsonStr = await file.readAsString();
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
