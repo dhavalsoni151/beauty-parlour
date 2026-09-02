@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
-import '../database/database_helper.dart';
+import '../database/database.dart';
 
 class SettingsProvider extends ChangeNotifier {
-  final _db = DatabaseHelper.instance;
+  final _settingsDao = SettingsDao();
   Map<String, String> _settings = {};
   bool _isLoaded = false;
 
@@ -15,13 +15,13 @@ class SettingsProvider extends ChangeNotifier {
   String get defaultPaymentMethod => _settings['default_payment_method'] ?? 'CASH';
 
   Future<void> loadSettings() async {
-    _settings = await _db.getSettings();
+    _settings = await _settingsDao.getSettings();
     _isLoaded = true;
     notifyListeners();
   }
 
   Future<void> updateSetting(String key, String value) async {
-    await _db.setSetting(key, value);
+    await _settingsDao.setSetting(key, value);
     _settings[key] = value;
     notifyListeners();
   }
@@ -32,10 +32,10 @@ class SettingsProvider extends ChangeNotifier {
     required String phone,
     required String address,
   }) async {
-    await _db.setSetting('parlour_name', parlourName);
-    await _db.setSetting('owner_name', ownerName);
-    await _db.setSetting('phone', phone);
-    await _db.setSetting('address', address);
+    await _settingsDao.setSetting('parlour_name', parlourName);
+    await _settingsDao.setSetting('owner_name', ownerName);
+    await _settingsDao.setSetting('phone', phone);
+    await _settingsDao.setSetting('address', address);
     _settings['parlour_name'] = parlourName;
     _settings['owner_name'] = ownerName;
     _settings['phone'] = phone;

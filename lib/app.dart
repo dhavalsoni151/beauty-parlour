@@ -7,6 +7,7 @@ import 'features/customers/customer_form_screen.dart';
 import 'features/customers/customer_profile_screen.dart';
 import 'features/services/categories_screen.dart';
 import 'features/services/services_screen.dart';
+import 'features/services/service_types_screen.dart';
 import 'features/visits/new_visit_screen.dart';
 import 'features/visits/visit_detail_screen.dart';
 import 'features/payments/pending_payments_screen.dart';
@@ -69,6 +70,14 @@ final GoRouter _router = GoRouter(
       builder: (c, s) {
         final categoryId = s.uri.queryParameters['categoryId'];
         return ServicesScreen(initialCategoryId: categoryId != null ? int.tryParse(categoryId) : null);
+      },
+    ),
+    GoRoute(
+      path: '/service-types',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) {
+        final categoryId = int.tryParse(s.uri.queryParameters['categoryId'] ?? '');
+        return ServiceTypesScreen(categoryId: categoryId ?? 0);
       },
     ),
     GoRoute(

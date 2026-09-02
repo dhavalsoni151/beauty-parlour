@@ -61,6 +61,13 @@ class DateRange {
 
   const DateRange({required this.start, required this.end, required this.label});
 
+  /// Exclusive upper bound: the midnight that starts the day AFTER [end].
+  /// Reporting queries use a half-open interval `>= start AND < endExclusive`
+  /// so nothing is missed at the midnight boundary (sub-second timestamps on
+  /// the final day are still included).
+  DateTime get endExclusive =>
+      DateTime(end.year, end.month, end.day).add(const Duration(days: 1));
+
   static DateRange today() {
     final now = DateTime.now();
     return DateRange(

@@ -138,8 +138,21 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
                     style: const TextStyle(fontSize: 10, color: AppColors.primary, fontWeight: FontWeight.w600)),
                 ),
                 const SizedBox(width: 8),
-                Expanded(child: Text(s.serviceNameSnapshot,
-                  style: const TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (s.serviceTypeNameSnapshot != null &&
+                          s.serviceTypeNameSnapshot!.isNotEmpty)
+                        Text(s.serviceTypeNameSnapshot!,
+                            style: const TextStyle(
+                                fontSize: 10, color: AppColors.textHint)),
+                      Text(s.serviceNameSnapshot,
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
                 if (s.quantity > 1) Text('×${s.quantity} ', style: const TextStyle(fontSize: 12, color: AppColors.textHint)),
                 Text(AppFormatters.formatCurrency(s.total),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),

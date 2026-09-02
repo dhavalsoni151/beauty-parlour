@@ -445,6 +445,41 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     final services = svcProvider.allServices.where((s) => s.categoryId == cat.id && s.isActive).toList();
     if (services.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
 
+    // Group services by service type (null = directly under the category).
+    // Preserves the DAO ordering (display_order) within each group.
+    final Map<String?, List<Service>> byType = {};
+    final List<String?> typeOrder = [];
+    for (final s in services) {
+      final key = s.serviceTypeName;
+      if (!byType.containsKey(key)) {
+        byType[key] = [];
+        typeOrder.add(key);
+      }
+      byType[key]!.add(s);
+    }
+    // Show untyped services first, then each named service type.
+    typeOrder.sort((a, b) {
+      if (a == null) return -1;
+      if (b == null) return 1;
+      return a.compareTo(b);
+    });
+
+    Widget serviceRow(Service svc) => _ServiceSelectRow(
+          service: svc,
+          billItem: _billItems.firstWhere((b) => b.service.id == svc.id,
+              orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
+          isSelected: _billItems.any((b) => b.service.id == svc.id),
+          onToggle: () => _toggleService(svc),
+          onPriceChanged: (v) {
+            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
+            if (idx >= 0) setState(() => _billItems[idx].price = v);
+          },
+          onQtyChanged: (v) {
+            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
+            if (idx >= 0) setState(() => _billItems[idx].quantity = v);
+          },
+        );
+
     return SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -461,20 +496,25 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.secondary)),
             ),
             const SizedBox(height: 8),
-            ...services.map((svc) => _ServiceSelectRow(
-              service: svc,
-              billItem: _billItems.firstWhere((b) => b.service.id == svc.id, orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
-              isSelected: _billItems.any((b) => b.service.id == svc.id),
-              onToggle: () => _toggleService(svc),
-              onPriceChanged: (v) {
-                final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
-                if (idx >= 0) setState(() => _billItems[idx].price = v);
-              },
-              onQtyChanged: (v) {
-                final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
-                if (idx >= 0) setState(() => _billItems[idx].quantity = v);
-              },
-            )),
+            for (final typeName in typeOrder) ...[
+              if (typeName != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.account_tree_rounded,
+                          size: 13, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(typeName,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ...byType[typeName]!.map(serviceRow),
+            ],
           ],
         ),
       ),
@@ -818,12 +858,16 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
 
       final visitServices = _billItems.map((item) => VisitService(
         visitId: 0,
-        serviceId: item.service.id!,
+        serviceId: item.service.id,
+        categoryId: item.service.categoryId,
+        serviceTypeId: item.service.serviceTypeId,
         serviceNameSnapshot: item.service.name,
         categoryNameSnapshot: item.service.categoryName ?? '',
+        serviceTypeNameSnapshot: item.service.serviceTypeName,
         price: item.price,
         quantity: item.quantity,
         total: item.total,
+        createdAt: createdStr,
       )).toList();
 
       final payments = paid > 0 ? [

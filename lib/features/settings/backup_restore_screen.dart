@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/database/database_helper.dart';
+import '../../core/database/database.dart';
 import '../../shared/widgets/app_widgets.dart';
 
 class BackupRestoreScreen extends StatefulWidget {
@@ -170,7 +170,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   Future<void> _createBackup() async {
     setState(() { _isLoading = true; _statusMessage = ''; });
     try {
-      final data = await DatabaseHelper.instance.exportAllData();
+      final data = await BackupService().exportAllData();
       final json = const JsonEncoder.withIndent('  ').convert(data);
       final now = DateTime.now();
       final fileName = 'beauty_parlour_backup_${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}_${now.hour.toString().padLeft(2,'0')}${now.minute.toString().padLeft(2,'0')}.json';
@@ -216,12 +216,42 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       final jsonStr = await file.readAsString();
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
-      await DatabaseHelper.instance.importAllData(data);
-      setState(() { _statusMessage = 'Backup restored successfully!'; });
+      // importData auto-detects the schema: new schema is restored directly,
+      // while legacy flat JSON is routed through the Category→ServiceType
+      // migration mapping, producing a MigrationReport.
+      final report = await BackupService().importData(data);
+      if (!mounted) return;
+      await _showReport(report);
+      setState(() {
+        _statusMessage = report.financialMatches
+            ? 'Backup restored successfully!'
+            : 'Restored, but financial totals did not reconcile — review the report.';
+      });
     } catch (e) {
-      setState(() { _statusMessage = 'Error restoring backup: $e'; });
+      setState(() {
+        _statusMessage = 'Error restoring backup: $e';
+      });
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _showReport(MigrationReport report) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore Report'),
+        content: SingleChildScrollView(
+          child: Text(report.buildSummary(),
+              style: const TextStyle(fontSize: 12, height: 1.4)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/category_provider.dart';
 import '../../core/models/customer_models.dart';
+import '../../core/database/daos/db_exceptions.dart';
 import '../../shared/widgets/app_widgets.dart';
 
 class CategoriesScreen extends StatefulWidget {
@@ -48,7 +49,10 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
               category: cats[i],
               onEdit: () => _showCategoryDialog(context, provider, cats[i]),
               onToggle: () => provider.toggleActive(cats[i]),
-              onViewServices: () => context.push('/services?categoryId=${cats[i].id}'),
+              onViewTypes: () =>
+                  context.push('/service-types?categoryId=${cats[i].id}'),
+              onViewServices: () =>
+                  context.push('/services?categoryId=${cats[i].id}'),
             ),
           );
         },
@@ -64,6 +68,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   Future<void> _showCategoryDialog(BuildContext context, CategoryProvider provider, [Category? existing]) async {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final descCtrl = TextEditingController(text: existing?.description ?? '');
+    final orderCtrl = TextEditingController(
+        text: existing != null ? existing.displayOrder.toString() : '');
     final formKey = GlobalKey<FormState>();
     final now = DateTime.now().toIso8601String();
 
@@ -88,6 +94,13 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                 decoration: const InputDecoration(labelText: 'Description (Optional)'),
                 maxLines: 2,
               ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: orderCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Display Order (Optional)'),
+                keyboardType: TextInputType.number,
+              ),
             ],
           ),
         ),
@@ -102,13 +115,23 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                 description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
                 createdDate: existing?.createdDate ?? now,
                 isActive: existing?.isActive ?? true,
+                displayOrder: int.tryParse(orderCtrl.text.trim()) ??
+                    existing?.displayOrder ??
+                    0,
               );
-              if (existing != null) {
-                await provider.updateCategory(cat);
-              } else {
-                await provider.addCategory(cat);
+              try {
+                if (existing != null) {
+                  await provider.updateCategory(cat);
+                } else {
+                  await provider.addCategory(cat);
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              } on DuplicateException catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                      SnackBar(content: Text(e.message)));
+                }
               }
-              Navigator.pop(ctx);
             },
             child: Text(existing != null ? 'Save' : 'Add'),
           ),
@@ -122,18 +145,23 @@ class _CategoryCard extends StatelessWidget {
   final Category category;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
+  final VoidCallback onViewTypes;
   final VoidCallback onViewServices;
 
   const _CategoryCard({
     required this.category,
     required this.onEdit,
     required this.onToggle,
+    required this.onViewTypes,
     required this.onViewServices,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onViewTypes,
+      child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: category.isActive ? Colors.white : const Color(0xFFF5F5F5),
@@ -163,7 +191,8 @@ class _CategoryCard extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                     color: category.isActive ? AppColors.textPrimary : AppColors.textHint,
                   )),
-                Text('${category.serviceCount} services',
+                Text(
+                  '${category.serviceTypeCount} Types • ${category.serviceCount} Services',
                   style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
               ],
             ),
@@ -173,9 +202,12 @@ class _CategoryCard extends StatelessWidget {
             onSelected: (v) {
               if (v == 'edit') onEdit();
               else if (v == 'toggle') onToggle();
+              else if (v == 'types') onViewTypes();
               else if (v == 'services') onViewServices();
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'types', child: ListTile(
+                leading: Icon(Icons.account_tree_rounded), title: Text('View Service Types'), dense: true)),
               const PopupMenuItem(value: 'services', child: ListTile(
                 leading: Icon(Icons.list_rounded), title: Text('View Services'), dense: true)),
               const PopupMenuItem(value: 'edit', child: ListTile(
@@ -188,6 +220,7 @@ class _CategoryCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
       ),
     );
   }

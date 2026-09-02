@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
-import '../database/database_helper.dart';
+import '../database/database.dart';
 import '../models/visit_models.dart';
 
 class ExpenseProvider extends ChangeNotifier {
-  final _db = DatabaseHelper.instance;
+  final _expenseDao = ExpenseDao();
+  final _reportDao = ReportDao();
+
   List<Expense> _expenses = [];
   List<ExpenseCategory> _categories = [];
   bool _isLoading = false;
@@ -15,13 +17,14 @@ class ExpenseProvider extends ChangeNotifier {
   List<ExpenseCategory> get categories => _categories;
   bool get isLoading => _isLoading;
 
-  Future<void> loadExpenses({String? startDate, String? endDate, int? categoryId}) async {
+  Future<void> loadExpenses(
+      {String? startDate, String? endDate, int? categoryId}) async {
     _isLoading = true;
     notifyListeners();
     _selectedCategoryId = categoryId;
     _startDate = startDate;
     _endDate = endDate;
-    _expenses = await _db.getExpenses(
+    _expenses = await _expenseDao.getExpenses(
       startDate: startDate,
       endDate: endDate,
       categoryId: categoryId,
@@ -31,38 +34,42 @@ class ExpenseProvider extends ChangeNotifier {
   }
 
   Future<void> loadCategories() async {
-    _categories = await _db.getExpenseCategories();
+    _categories = await _expenseDao.getCategories();
     notifyListeners();
   }
 
   double get totalExpenses => _expenses.fold(0, (sum, e) => sum + e.amount);
 
   Future<void> addExpense(Expense expense) async {
-    await _db.insertExpense(expense);
-    await loadExpenses(startDate: _startDate, endDate: _endDate, categoryId: _selectedCategoryId);
+    await _expenseDao.insert(expense);
+    await loadExpenses(
+        startDate: _startDate, endDate: _endDate, categoryId: _selectedCategoryId);
   }
 
   Future<void> updateExpense(Expense expense) async {
-    await _db.updateExpense(expense);
-    await loadExpenses(startDate: _startDate, endDate: _endDate, categoryId: _selectedCategoryId);
+    await _expenseDao.update(expense);
+    await loadExpenses(
+        startDate: _startDate, endDate: _endDate, categoryId: _selectedCategoryId);
   }
 
   Future<void> deleteExpense(int id) async {
-    await _db.deleteExpense(id);
-    await loadExpenses(startDate: _startDate, endDate: _endDate, categoryId: _selectedCategoryId);
+    await _expenseDao.delete(id);
+    await loadExpenses(
+        startDate: _startDate, endDate: _endDate, categoryId: _selectedCategoryId);
   }
 
   Future<void> addCategory(ExpenseCategory cat) async {
-    await _db.insertExpenseCategory(cat);
+    await _expenseDao.insertCategory(cat);
     await loadCategories();
   }
 
   Future<void> updateCategory(ExpenseCategory cat) async {
-    await _db.updateExpenseCategory(cat);
+    await _expenseDao.updateCategory(cat);
     await loadCategories();
   }
 
-  Future<List<Map<String, dynamic>>> getExpenseByCategory(String startDate, String endDate) async {
-    return await _db.getExpenseByCategory(startDate, endDate);
+  Future<List<Map<String, dynamic>>> getExpenseByCategory(
+      String startDate, String endDate) async {
+    return _reportDao.getExpenseByCategory(startDate, endDate);
   }
 }

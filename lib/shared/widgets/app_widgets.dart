@@ -339,7 +339,7 @@ class _DateRangeSelectorState extends State<DateRangeSelector> {
     }
     widget.onRangeSelected(
       range.start.toIso8601String(),
-      range.end.toIso8601String(),
+      range.endExclusive.toIso8601String(),
       label,
     );
   }
@@ -361,7 +361,7 @@ class _DateRangeSelectorState extends State<DateRangeSelector> {
       final range = DateRange.custom(picked.start, picked.end);
       widget.onRangeSelected(
         range.start.toIso8601String(),
-        range.end.toIso8601String(),
+        range.endExclusive.toIso8601String(),
         'Custom',
       );
     }
