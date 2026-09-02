@@ -58,6 +58,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<CategoryProvider>().loadCategories();
       await context.read<ServiceProvider>().loadServices();
+      await context.read<CustomerProvider>().loadCustomers();
       if (widget.preselectedCustomerId != null) {
         final c = await context.read<CustomerProvider>().getCustomer(widget.preselectedCustomerId!);
         if (c != null) {
@@ -67,8 +68,11 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
           });
         }
       }
-      // Load all customers for search
-      _customerSearchResults = context.read<CustomerProvider>().allCustomers;
+      // Show all customers by default so one can be picked without typing a search
+      if (!mounted) return;
+      final all = List<Customer>.from(context.read<CustomerProvider>().allCustomers)
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      setState(() => _customerSearchResults = all);
     });
   }
 
@@ -143,52 +147,75 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
             style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 48)),
           ),
         ),
-        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            _customerQueryCtrl.text.isEmpty
+                ? '${_customerSearchResults.length} customers · tap to select'
+                : '${_customerSearchResults.length} results',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textHint),
+          ),
+        ),
         Expanded(
           child: _customerSearchResults.isEmpty
               ? const Center(child: Text('No customers found', style: TextStyle(color: AppColors.textHint)))
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
                   itemCount: _customerSearchResults.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, i) {
                     final c = _customerSearchResults[i];
                     final initials = c.name.trim().split(' ')
                         .map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase();
-                    return GestureDetector(
-                      onTap: () => setState(() {
-                        _selectedCustomer = c;
-                        _step = 1;
-                      }),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.divider),
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 20,
-                              backgroundColor: AppColors.primaryContainer,
-                              child: Text(initials,
-                                style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 14)),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(c.name,
-                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                                  if (c.phone != null && c.phone!.isNotEmpty)
-                                    Text(c.phone!, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                                ],
+                    final avatarColor = AppColors.chartColors[c.name.hashCode.abs() % AppColors.chartColors.length];
+                    return Material(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => setState(() {
+                          _selectedCustomer = c;
+                          _step = 1;
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.divider),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2)),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 22,
+                                backgroundColor: avatarColor.withOpacity(0.15),
+                                child: Text(initials,
+                                  style: TextStyle(color: avatarColor, fontWeight: FontWeight.w700, fontSize: 14)),
                               ),
-                            ),
-                            const Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
-                          ],
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(c.name,
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                    if (c.phone != null && c.phone!.isNotEmpty)
+                                      Text(c.phone!, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primaryContainer,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.chevron_right_rounded, color: AppColors.primary, size: 18),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -201,7 +228,8 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
 
   void _searchCustomers(String q) {
     setState(() {
-      final all = context.read<CustomerProvider>().allCustomers;
+      final all = List<Customer>.from(context.read<CustomerProvider>().allCustomers)
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       if (q.isEmpty) {
         _customerSearchResults = all;
       } else {

@@ -498,8 +498,8 @@ class DatabaseHelper {
     final db = await database;
     final wheres = <String>[];
     final args = <dynamic>[];
-    if (startDate != null) { wheres.add('e.expense_date >= ?'); args.add(startDate); }
-    if (endDate != null) { wheres.add('e.expense_date <= ?'); args.add(endDate); }
+    if (startDate != null) { wheres.add('DATE(e.expense_date) >= DATE(?)'); args.add(startDate); }
+    if (endDate != null) { wheres.add('DATE(e.expense_date) <= DATE(?)'); args.add(endDate); }
     if (categoryId != null) { wheres.add('e.expense_category_id = ?'); args.add(categoryId); }
     final where = wheres.isEmpty ? '' : 'WHERE ${wheres.join(' AND ')}';
     final rows = await db.rawQuery('''
@@ -535,7 +535,7 @@ class DatabaseHelper {
     final expenseResult = await db.rawQuery('''
       SELECT SUM(amount) as total_expenses
       FROM expenses
-      WHERE expense_date >= ? AND expense_date <= ?
+      WHERE DATE(expense_date) >= DATE(?) AND DATE(expense_date) <= DATE(?)
     ''', [startDate, endDate]);
 
     final newCustomers = await db.rawQuery('''
@@ -672,7 +672,7 @@ class DatabaseHelper {
       SELECT ec.name, SUM(e.amount) as total
       FROM expenses e
       JOIN expense_categories ec ON ec.id = e.expense_category_id
-      WHERE e.expense_date >= ? AND e.expense_date <= ?
+      WHERE DATE(e.expense_date) >= DATE(?) AND DATE(e.expense_date) <= DATE(?)
       GROUP BY ec.name
       ORDER BY total DESC
     ''', [startDate, endDate]);
