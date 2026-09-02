@@ -44,6 +44,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   PaymentMethod _paymentMethod = PaymentMethod.cash;
   double _paidAmount = 0;
   final _paidCtrl = TextEditingController();
+  DateTime _visitDate = DateUtils.dateOnly(DateTime.now());
 
   bool _isSaving = false;
   int? _savedVisitId;
@@ -334,6 +335,10 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                   ),
                 ],
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: _buildVisitDateField(),
             ),
             Expanded(
               child: !hasAnyService
@@ -741,11 +746,62 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     );
   }
 
+  Widget _buildVisitDateField() {
+    return InkWell(
+      onTap: _pickVisitDate,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8F0F5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.textSecondary),
+            const SizedBox(width: 12),
+            const Text(
+              'Visit Date',
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const Spacer(),
+            Text(
+              '${_visitDate.day}/${_visitDate.month}/${_visitDate.year}',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+            ),
+            const SizedBox(width: 6),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textHint, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickVisitDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _visitDate,
+      firstDate: DateTime(2020),
+      lastDate: DateUtils.dateOnly(DateTime.now()),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: Theme.of(ctx).colorScheme.copyWith(primary: AppColors.primary),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(() => _visitDate = DateUtils.dateOnly(picked));
+    }
+  }
+
   Future<void> _saveVisit() async {
     setState(() => _isSaving = true);
     try {
       final now = DateTime.now();
-      final dateStr = now.toIso8601String();
+      final dateStr = _visitDate.toIso8601String();
+      final createdDate = now.toIso8601String();
       final paid = _paidAmount.clamp(0.0, _finalTotal);
       final pending = (_finalTotal - paid).clamp(0.0, double.infinity);
 
@@ -760,7 +816,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         totalPaid: paid,
         pendingAmount: pending,
         paymentStatus: _paymentStatus,
-        createdDate: dateStr,
+        createdDate: createdDate,
       );
 
       final visitServices = _billItems.map((item) => VisitService(
