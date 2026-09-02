@@ -19,14 +19,13 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Force all plugins (subprojects) to compile against SDK 36
-// so that file_picker and similar plugins satisfy flutter_plugin_android_lifecycle's requirement.
+// Force compileSdk 36 on all plugin subprojects.
+// Uses plugins.withId() which fires at plugin-apply time (before evaluation),
+// avoiding the "already evaluated" error caused by evaluationDependsOn(":app").
 subprojects {
-    afterEvaluate {
-        if (extensions.findByName("android") != null) {
-            extensions.configure<com.android.build.gradle.BaseExtension>("android") {
-                compileSdkVersion(36)
-            }
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.gradle.LibraryExtension> {
+            compileSdk = 36
         }
     }
 }
