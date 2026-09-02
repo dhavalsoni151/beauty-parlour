@@ -161,7 +161,7 @@ class DatabaseHelper {
 
     // Default settings
     final defaultSettings = {
-      'parlour_name': 'My Beauty Parlour',
+      'parlour_name': 'Priyanka Beauty Parlour',
       'owner_name': '',
       'phone': '',
       'address': '',

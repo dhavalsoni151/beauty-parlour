@@ -16,13 +16,27 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DashboardProvider>().loadDashboard();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<DashboardProvider>().loadDashboard();
+    }
   }
 
   @override
@@ -136,13 +150,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 class _QuickActions extends StatelessWidget {
+  Future<void> _openAndRefresh(BuildContext context, String route) async {
+    await context.push(route);
+    if (context.mounted) {
+      await context.read<DashboardProvider>().loadDashboard();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final actions = [
-      ('New Visit', Icons.add_circle_rounded, AppColors.primary, () => context.push('/new-visit')),
-      ('Customer', Icons.person_add_rounded, AppColors.secondary, () => context.push('/customer/new')),
-      ('Expense', Icons.receipt_rounded, AppColors.warning, () => context.push('/expenses')),
-      ('Pending', Icons.pending_actions_rounded, AppColors.error, () => context.push('/pending-payments')),
+      ('New Visit', Icons.add_circle_rounded, AppColors.primary, () => _openAndRefresh(context, '/new-visit')),
+      ('Customer', Icons.person_add_rounded, AppColors.secondary, () => _openAndRefresh(context, '/customer/new')),
+      ('Expense', Icons.receipt_rounded, AppColors.warning, () => _openAndRefresh(context, '/expenses')),
+      ('Pending', Icons.pending_actions_rounded, AppColors.error, () => _openAndRefresh(context, '/pending-payments')),
     ];
 
     return Row(

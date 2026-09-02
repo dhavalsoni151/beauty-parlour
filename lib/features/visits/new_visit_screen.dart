@@ -48,6 +48,9 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   bool _isSaving = false;
   int? _savedVisitId;
 
+  // Visit date — defaults to today but any past/future date can be chosen
+  DateTime _visitDate = DateTime.now();
+
   // Customer search
   List<Customer> _customerSearchResults = [];
   final _customerQueryCtrl = TextEditingController();
@@ -592,6 +595,8 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
+                _buildVisitDateSelector(),
+                const SizedBox(height: 16),
                 // Bill recap
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -726,11 +731,12 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveVisit,
+                    onPressed: (_isSaving || _savedVisitId != null) ? null : _saveVisit,
                     child: _isSaving
                         ? const SizedBox(width: 20, height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Save Bill', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        : Text(_savedVisitId != null ? 'Bill Saved' : 'Save Bill',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],
@@ -741,11 +747,58 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     );
   }
 
+  Future<void> _pickVisitDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _visitDate,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 1, now.month, now.day),
+      helpText: 'Select Visit Date',
+    );
+    if (picked != null) setState(() => _visitDate = picked);
+  }
+
+  Widget _buildVisitDateSelector() {
+    return InkWell(
+      onTap: _savedVisitId != null ? null : _pickVisitDate,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.event_rounded, size: 20, color: AppColors.primary),
+            const SizedBox(width: 10),
+            const Text('Visit Date',
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            const Spacer(),
+            Text(AppFormatters.formatDate(_visitDate),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(width: 6),
+            const Icon(Icons.edit_calendar_rounded, size: 18, color: AppColors.textHint),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveVisit() async {
+    // Guard against duplicate visits from repeated taps or going back after save
+    if (_isSaving || _savedVisitId != null) return;
     setState(() => _isSaving = true);
     try {
       final now = DateTime.now();
-      final dateStr = now.toIso8601String();
+      final visitDateTime = DateTime(
+        _visitDate.year, _visitDate.month, _visitDate.day,
+        now.hour, now.minute, now.second,
+      );
+      final dateStr = visitDateTime.toIso8601String();
+      final createdStr = now.toIso8601String();
       final paid = _paidAmount.clamp(0.0, _finalTotal);
       final pending = (_finalTotal - paid).clamp(0.0, double.infinity);
 
@@ -760,7 +813,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         totalPaid: paid,
         pendingAmount: pending,
         paymentStatus: _paymentStatus,
-        createdDate: dateStr,
+        createdDate: createdStr,
       );
 
       final visitServices = _billItems.map((item) => VisitService(
@@ -834,7 +887,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
               child: ElevatedButton(
                 onPressed: () {
                   Navigator.pop(ctx);
-                  context.push('/new-visit');
+                  context.pushReplacement('/new-visit');
                 },
                 child: const Text('New Visit'),
               ),
@@ -846,7 +899,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                   child: OutlinedButton(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      context.push('/visit/$visitId');
+                      context.pushReplacement('/visit/$visitId');
                     },
                     child: const Text('View Bill'),
                   ),
@@ -856,7 +909,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                   child: OutlinedButton(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      context.push('/customer/${_selectedCustomer!.id}/profile');
+                      context.pushReplacement('/customer/${_selectedCustomer!.id}/profile');
                     },
                     child: const Text('Customer'),
                   ),
@@ -866,7 +919,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                context.pop();
+                _leaveToCustomers();
               },
               child: const Text('Done', style: TextStyle(color: AppColors.textSecondary)),
             ),
@@ -910,31 +963,49 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     );
   }
 
+  // After a bill is saved there is nothing left to do on this screen, so leaving
+  // it always lands on the customer list instead of the (already saved) bill form.
+  void _leaveToCustomers() => context.go('/customers');
+
+  void _close() {
+    if (_savedVisitId != null) {
+      _leaveToCustomers();
+    } else {
+      context.pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('New Visit'),
-        leading: IconButton(
-          icon: const Icon(Icons.close_rounded),
-          onPressed: () => context.pop(),
+    return PopScope(
+      canPop: _savedVisitId == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leaveToCustomers();
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          title: const Text('New Visit'),
+          leading: IconButton(
+            icon: const Icon(Icons.close_rounded),
+            onPressed: _close,
+          ),
+          actions: [
+            if (_step > 0 && _savedVisitId == null)
+              TextButton(
+                onPressed: () => setState(() => _step = _step - 1),
+                child: const Text('Back'),
+              ),
+          ],
         ),
-        actions: [
-          if (_step > 0 && _savedVisitId == null)
-            TextButton(
-              onPressed: () => setState(() => _step = _step - 1),
-              child: const Text('Back'),
-            ),
-        ],
-      ),
-      body: IndexedStack(
-        index: _step,
-        children: [
-          _buildCustomerStep(),
-          _selectedCustomer == null ? const SizedBox.shrink() : _buildServicesStep(),
-          _selectedCustomer == null ? const SizedBox.shrink() : _buildPaymentStep(),
-        ],
+        body: IndexedStack(
+          index: _step,
+          children: [
+            _buildCustomerStep(),
+            _selectedCustomer == null ? const SizedBox.shrink() : _buildServicesStep(),
+            _selectedCustomer == null ? const SizedBox.shrink() : _buildPaymentStep(),
+          ],
+        ),
       ),
     );
   }
