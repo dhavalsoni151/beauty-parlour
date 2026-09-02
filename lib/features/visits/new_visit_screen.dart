@@ -49,7 +49,6 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   int? _savedVisitId;
 
   // Customer search
-  String _customerQuery = '';
   List<Customer> _customerSearchResults = [];
   final _customerQueryCtrl = TextEditingController();
 
@@ -202,7 +201,6 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
 
   void _searchCustomers(String q) {
     setState(() {
-      _customerQuery = q;
       final all = context.read<CustomerProvider>().allCustomers;
       if (q.isEmpty) {
         _customerSearchResults = all;
@@ -279,44 +277,136 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     return Consumer2<CategoryProvider, ServiceProvider>(
       builder: (context, catProvider, svcProvider, _) {
         final categories = catProvider.activeCategories;
+        final hasAnyService = svcProvider.allServices.any((s) => s.isActive);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildStepHeader('Add Services', Icons.spa_rounded),
-            Expanded(
-              child: CustomScrollView(
-                slivers: [
-                  // Customer chip
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.person_rounded, size: 16, color: AppColors.primary),
-                          const SizedBox(width: 6),
-                          Text(_selectedCustomer!.name,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary)),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => setState(() { _step = 0; _selectedCustomer = null; }),
-                            child: const Text('Change', style: TextStyle(fontSize: 12)),
-                          ),
-                        ],
-                      ),
-                    ),
+            _buildStepHeader(
+              'Add Services',
+              Icons.spa_rounded,
+              trailing: IconButton(
+                icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary),
+                tooltip: 'Add New Service',
+                onPressed: () => _showAddServiceDialog(catProvider, svcProvider),
+              ),
+            ),
+            // Customer chip
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_rounded, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Text(_selectedCustomer!.name,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => setState(() { _step = 0; _selectedCustomer = null; }),
+                    child: const Text('Change', style: TextStyle(fontSize: 12)),
                   ),
-                  // Category tabs with services
-                  for (final cat in categories)
-                    _buildCategorySection(cat, svcProvider),
-                  // Bill summary at bottom
-                  SliverToBoxAdapter(child: _buildBillSummary()),
-                  const SliverToBoxAdapter(child: SizedBox(height: 80)),
                 ],
               ),
+            ),
+            Expanded(
+              child: !hasAnyService
+                  ? EmptyState(
+                      title: 'No Services Yet',
+                      subtitle: 'Add a service to start billing this customer',
+                      icon: Icons.spa_rounded,
+                      actionLabel: 'Add Service',
+                      onAction: () => _showAddServiceDialog(catProvider, svcProvider),
+                    )
+                  : CustomScrollView(
+                      slivers: [
+                        // Category tabs with services
+                        for (final cat in categories)
+                          _buildCategorySection(cat, svcProvider),
+                        // Bill summary at bottom
+                        SliverToBoxAdapter(child: _buildBillSummary()),
+                        const SliverToBoxAdapter(child: SizedBox(height: 80)),
+                      ],
+                    ),
             ),
           ],
         );
       },
+    );
+  }
+
+  Future<void> _showAddServiceDialog(CategoryProvider catProvider, ServiceProvider svcProvider) async {
+    final cats = catProvider.activeCategories;
+    if (cats.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please add a service category first from Settings')));
+      return;
+    }
+
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    int? selectedCategoryId = cats.first.id;
+    final now = DateTime.now().toIso8601String();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('New Service'),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<int>(
+                    initialValue: selectedCategoryId,
+                    decoration: const InputDecoration(labelText: 'Category *'),
+                    items: cats.map((c) => DropdownMenuItem<int>(value: c.id!, child: Text(c.name))).toList(),
+                    onChanged: (v) => setDialogState(() => selectedCategoryId = v),
+                    validator: (v) => v == null ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'Service Name *'),
+                    validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+                    autofocus: true,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: priceCtrl,
+                    decoration: const InputDecoration(labelText: 'Default Price (₹) *', prefixText: '₹ '),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Required';
+                      if (double.tryParse(v) == null) return 'Invalid';
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) return;
+                final svc = Service(
+                  categoryId: selectedCategoryId!,
+                  name: nameCtrl.text.trim(),
+                  defaultPrice: double.parse(priceCtrl.text),
+                  createdDate: now,
+                );
+                await svcProvider.addService(svc);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -758,7 +848,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     );
   }
 
-  Widget _buildStepHeader(String title, IconData icon) {
+  Widget _buildStepHeader(String title, IconData icon, {Widget? trailing}) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       decoration: const BoxDecoration(
@@ -771,6 +861,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
           const SizedBox(width: 8),
           Text(title,
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          if (trailing != null) trailing,
           const Spacer(),
           // Steps indicator
           Row(
