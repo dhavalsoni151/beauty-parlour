@@ -120,7 +120,7 @@ class BeautyParlourApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Beauty Parlour',
+      title: 'Priyanka Beauty Parlour',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.light,

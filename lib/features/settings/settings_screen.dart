@@ -173,7 +173,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isSaving = true);
     try {
       await context.read<SettingsProvider>().updateAll(
-        parlourName: _parlourNameCtrl.text.trim().isEmpty ? 'My Beauty Parlour' : _parlourNameCtrl.text.trim(),
+        parlourName: _parlourNameCtrl.text.trim().isEmpty ? 'Priyanka Beauty Parlour' : _parlourNameCtrl.text.trim(),
         ownerName: _ownerNameCtrl.text.trim(),
         phone: _phoneCtrl.text.trim(),
         address: _addressCtrl.text.trim(),

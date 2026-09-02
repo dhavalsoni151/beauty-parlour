@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/expense_provider.dart';
+import '../../core/providers/dashboard_provider.dart';
 import '../../core/models/visit_models.dart';
 
 class ExpenseFormScreen extends StatefulWidget {
@@ -210,11 +211,13 @@ class _ExpenseFormScreenState extends State<ExpenseFormScreen> {
         createdDate: _existing?.createdDate ?? now,
       );
       final provider = context.read<ExpenseProvider>();
+      final dashboard = context.read<DashboardProvider>();
       if (_existing != null) {
         await provider.updateExpense(expense);
       } else {
         await provider.addExpense(expense);
       }
+      await dashboard.loadDashboard();
       if (mounted) context.pop();
     } finally {
       if (mounted) setState(() => _isSaving = false);

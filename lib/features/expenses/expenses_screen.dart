@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/expense_provider.dart';
+import '../../core/providers/dashboard_provider.dart';
 import '../../core/models/visit_models.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
@@ -187,8 +188,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       confirmLabel: 'Delete',
       confirmColor: AppColors.error,
     );
-    if (confirmed) {
+    if (confirmed && mounted) {
       await context.read<ExpenseProvider>().deleteExpense(id);
+      if (mounted) await context.read<DashboardProvider>().loadDashboard();
     }
   }
 }

@@ -7,7 +7,7 @@ class SettingsProvider extends ChangeNotifier {
   bool _isLoaded = false;
 
   bool get isLoaded => _isLoaded;
-  String get parlourName => _settings['parlour_name'] ?? 'My Beauty Parlour';
+  String get parlourName => _settings['parlour_name'] ?? 'Priyanka Beauty Parlour';
   String get ownerName => _settings['owner_name'] ?? '';
   String get phone => _settings['phone'] ?? '';
   String get address => _settings['address'] ?? '';
