@@ -68,8 +68,12 @@ class Category {
   final String? description;
   final bool isActive;
   final String createdDate;
+  final String? updatedDate;
   final int displayOrder;
+
+  // Joined/aggregated fields (not persisted directly).
   int serviceCount;
+  int serviceTypeCount;
 
   Category({
     this.id,
@@ -77,8 +81,10 @@ class Category {
     this.description,
     this.isActive = true,
     required this.createdDate,
+    this.updatedDate,
     this.displayOrder = 0,
     this.serviceCount = 0,
+    this.serviceTypeCount = 0,
   });
 
   factory Category.fromMap(Map<String, dynamic> map) {
@@ -88,8 +94,10 @@ class Category {
       description: map['description'] as String?,
       isActive: (map['is_active'] as int? ?? 1) == 1,
       createdDate: map['created_date'] as String,
+      updatedDate: map['updated_date'] as String?,
       displayOrder: map['display_order'] as int? ?? 0,
       serviceCount: map['service_count'] as int? ?? 0,
+      serviceTypeCount: map['service_type_count'] as int? ?? 0,
     );
   }
 
@@ -100,6 +108,7 @@ class Category {
       'description': description,
       'is_active': isActive ? 1 : 0,
       'created_date': createdDate,
+      'updated_date': updatedDate,
       'display_order': displayOrder,
     };
   }
@@ -110,8 +119,10 @@ class Category {
     String? description,
     bool? isActive,
     String? createdDate,
+    String? updatedDate,
     int? displayOrder,
     int? serviceCount,
+    int? serviceTypeCount,
   }) {
     return Category(
       id: id ?? this.id,
@@ -119,43 +130,55 @@ class Category {
       description: description ?? this.description,
       isActive: isActive ?? this.isActive,
       createdDate: createdDate ?? this.createdDate,
+      updatedDate: updatedDate ?? this.updatedDate,
       displayOrder: displayOrder ?? this.displayOrder,
       serviceCount: serviceCount ?? this.serviceCount,
+      serviceTypeCount: serviceTypeCount ?? this.serviceTypeCount,
     );
   }
 }
 
-class Service {
+/// Sub-category level between [Category] and [Service] (e.g. "Rica Wax" under
+/// the "Wax" category). Optional — a service can hang directly off a category.
+class ServiceType {
   final int? id;
   final int categoryId;
   final String name;
-  final double defaultPrice;
   final String? description;
   final bool isActive;
   final String createdDate;
-  String? categoryName;
+  final String? updatedDate;
+  final int displayOrder;
 
-  Service({
+  // Joined/aggregated fields.
+  String? categoryName;
+  int serviceCount;
+
+  ServiceType({
     this.id,
     required this.categoryId,
     required this.name,
-    required this.defaultPrice,
     this.description,
     this.isActive = true,
     required this.createdDate,
+    this.updatedDate,
+    this.displayOrder = 0,
     this.categoryName,
+    this.serviceCount = 0,
   });
 
-  factory Service.fromMap(Map<String, dynamic> map) {
-    return Service(
+  factory ServiceType.fromMap(Map<String, dynamic> map) {
+    return ServiceType(
       id: map['id'] as int?,
       categoryId: map['category_id'] as int,
       name: map['name'] as String,
-      defaultPrice: (map['default_price'] as num).toDouble(),
       description: map['description'] as String?,
       isActive: (map['is_active'] as int? ?? 1) == 1,
       createdDate: map['created_date'] as String,
+      updatedDate: map['updated_date'] as String?,
+      displayOrder: map['display_order'] as int? ?? 0,
       categoryName: map['category_name'] as String?,
+      serviceCount: map['service_count'] as int? ?? 0,
     );
   }
 
@@ -164,32 +187,132 @@ class Service {
       if (id != null) 'id': id,
       'category_id': categoryId,
       'name': name,
+      'description': description,
+      'is_active': isActive ? 1 : 0,
+      'created_date': createdDate,
+      'updated_date': updatedDate,
+      'display_order': displayOrder,
+    };
+  }
+
+  ServiceType copyWith({
+    int? id,
+    int? categoryId,
+    String? name,
+    String? description,
+    bool? isActive,
+    String? createdDate,
+    String? updatedDate,
+    int? displayOrder,
+    String? categoryName,
+    int? serviceCount,
+  }) {
+    return ServiceType(
+      id: id ?? this.id,
+      categoryId: categoryId ?? this.categoryId,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      isActive: isActive ?? this.isActive,
+      createdDate: createdDate ?? this.createdDate,
+      updatedDate: updatedDate ?? this.updatedDate,
+      displayOrder: displayOrder ?? this.displayOrder,
+      categoryName: categoryName ?? this.categoryName,
+      serviceCount: serviceCount ?? this.serviceCount,
+    );
+  }
+}
+
+class Service {
+  final int? id;
+  final int categoryId;
+  final int? serviceTypeId; // optional — a service may sit directly under a category
+  final String name;
+  final double defaultPrice;
+  final String? description;
+  final bool isActive;
+  final String createdDate;
+  final String? updatedDate;
+  final int displayOrder;
+
+  // Joined fields.
+  String? categoryName;
+  String? serviceTypeName;
+
+  Service({
+    this.id,
+    required this.categoryId,
+    this.serviceTypeId,
+    required this.name,
+    required this.defaultPrice,
+    this.description,
+    this.isActive = true,
+    required this.createdDate,
+    this.updatedDate,
+    this.displayOrder = 0,
+    this.categoryName,
+    this.serviceTypeName,
+  });
+
+  factory Service.fromMap(Map<String, dynamic> map) {
+    return Service(
+      id: map['id'] as int?,
+      categoryId: map['category_id'] as int,
+      serviceTypeId: map['service_type_id'] as int?,
+      name: map['name'] as String,
+      defaultPrice: (map['default_price'] as num).toDouble(),
+      description: map['description'] as String?,
+      isActive: (map['is_active'] as int? ?? 1) == 1,
+      createdDate: map['created_date'] as String,
+      updatedDate: map['updated_date'] as String?,
+      displayOrder: map['display_order'] as int? ?? 0,
+      categoryName: map['category_name'] as String?,
+      serviceTypeName: map['service_type_name'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      if (id != null) 'id': id,
+      'category_id': categoryId,
+      'service_type_id': serviceTypeId,
+      'name': name,
       'default_price': defaultPrice,
       'description': description,
       'is_active': isActive ? 1 : 0,
       'created_date': createdDate,
+      'updated_date': updatedDate,
+      'display_order': displayOrder,
     };
   }
 
   Service copyWith({
     int? id,
     int? categoryId,
+    int? serviceTypeId,
+    bool clearServiceTypeId = false,
     String? name,
     double? defaultPrice,
     String? description,
     bool? isActive,
     String? createdDate,
+    String? updatedDate,
+    int? displayOrder,
     String? categoryName,
+    String? serviceTypeName,
   }) {
     return Service(
       id: id ?? this.id,
       categoryId: categoryId ?? this.categoryId,
+      serviceTypeId: clearServiceTypeId ? null : (serviceTypeId ?? this.serviceTypeId),
       name: name ?? this.name,
       defaultPrice: defaultPrice ?? this.defaultPrice,
       description: description ?? this.description,
       isActive: isActive ?? this.isActive,
       createdDate: createdDate ?? this.createdDate,
+      updatedDate: updatedDate ?? this.updatedDate,
+      displayOrder: displayOrder ?? this.displayOrder,
       categoryName: categoryName ?? this.categoryName,
+      serviceTypeName: serviceTypeName ?? this.serviceTypeName,
     );
   }
 }

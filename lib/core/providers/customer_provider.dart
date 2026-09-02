@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
-import '../database/database_helper.dart';
+import '../database/database.dart';
 import '../models/customer_models.dart';
 
 class CustomerProvider extends ChangeNotifier {
-  final _db = DatabaseHelper.instance;
+  final _customerDao = CustomerDao();
+  final _reportDao = ReportDao();
+
   List<Customer> _customers = [];
   List<Customer> _filteredCustomers = [];
   bool _isLoading = false;
@@ -16,7 +18,7 @@ class CustomerProvider extends ChangeNotifier {
   Future<void> loadCustomers({bool activeOnly = true}) async {
     _isLoading = true;
     notifyListeners();
-    _customers = await _db.getCustomers(activeOnly: activeOnly);
+    _customers = await _customerDao.getAll(activeOnly: activeOnly);
     _applyFilter();
     _isLoading = false;
     notifyListeners();
@@ -33,42 +35,43 @@ class CustomerProvider extends ChangeNotifier {
       _filteredCustomers = List.from(_customers);
     } else {
       final q = _searchQuery.toLowerCase();
-      _filteredCustomers = _customers.where((c) =>
-        c.name.toLowerCase().contains(q) ||
-        (c.phone?.contains(q) ?? false)
-      ).toList();
+      _filteredCustomers = _customers
+          .where((c) =>
+              c.name.toLowerCase().contains(q) ||
+              (c.phone?.contains(q) ?? false))
+          .toList();
     }
   }
 
   Future<Customer?> getCustomer(int id) async {
-    return await _db.getCustomer(id);
+    return _customerDao.get(id);
   }
 
   Future<List<Customer>> searchCustomers(String query) async {
     if (query.isEmpty) return _customers;
-    return await _db.searchCustomers(query);
+    return _customerDao.search(query);
   }
 
   Future<int> addCustomer(Customer customer) async {
-    final id = await _db.insertCustomer(customer);
+    final id = await _customerDao.insert(customer);
     await loadCustomers();
     return id;
   }
 
   Future<void> updateCustomer(Customer customer) async {
-    await _db.updateCustomer(customer);
+    await _customerDao.update(customer);
     await loadCustomers();
   }
 
   Future<void> deactivateCustomer(int id) async {
-    final customer = await _db.getCustomer(id);
+    final customer = await _customerDao.get(id);
     if (customer != null) {
-      await _db.updateCustomer(customer.copyWith(isActive: false));
+      await _customerDao.update(customer.copyWith(isActive: false));
       await loadCustomers();
     }
   }
 
   Future<Map<String, dynamic>> getCustomerStats(int id) async {
-    return await _db.getCustomerStats(id);
+    return _reportDao.getCustomerStats(id);
   }
 }

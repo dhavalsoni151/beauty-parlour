@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +7,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/providers/dashboard_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/providers/visit_provider.dart';
+import '../../core/database/daos/settings_dao.dart';
+import '../../core/database/migration_mapping.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
 
@@ -23,7 +26,41 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DashboardProvider>().loadDashboard();
+      _checkMigrationReport();
     });
+  }
+
+  /// If a legacy-data migration ran on this launch, a report was stored under
+  /// the `pending_migration_report` settings key. Show it once, then clear it.
+  Future<void> _checkMigrationReport() async {
+    final dao = SettingsDao();
+    final raw = await dao.getSetting('pending_migration_report');
+    if (raw == null || raw.isEmpty) return;
+    await dao.deleteSetting('pending_migration_report');
+    if (!mounted) return;
+    MigrationReport report;
+    try {
+      report = MigrationReport.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Data Migration Complete'),
+        content: SingleChildScrollView(
+          child: Text(report.buildSummary(),
+              style: const TextStyle(fontSize: 13, height: 1.4)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK')),
+        ],
+      ),
+    );
   }
 
   @override

@@ -77,34 +77,46 @@ extension PaymentMethodX on PaymentMethod {
 class VisitService {
   final int? id;
   final int visitId;
-  final int serviceId;
-  final String serviceNameSnapshot;
+  final int? serviceId; // nullable — service master row may be gone/optional
+  final int? categoryId;
+  final int? serviceTypeId;
   final String categoryNameSnapshot;
-  final double price;
+  final String? serviceTypeNameSnapshot;
+  final String serviceNameSnapshot;
+  final double price; // unit price
   final int quantity;
   final double total;
+  final String? createdAt;
 
   const VisitService({
     this.id,
     required this.visitId,
-    required this.serviceId,
-    required this.serviceNameSnapshot,
+    this.serviceId,
+    this.categoryId,
+    this.serviceTypeId,
     required this.categoryNameSnapshot,
+    this.serviceTypeNameSnapshot,
+    required this.serviceNameSnapshot,
     required this.price,
     this.quantity = 1,
     required this.total,
+    this.createdAt,
   });
 
   factory VisitService.fromMap(Map<String, dynamic> map) {
     return VisitService(
       id: map['id'] as int?,
       visitId: map['visit_id'] as int,
-      serviceId: map['service_id'] as int,
-      serviceNameSnapshot: map['service_name_snapshot'] as String,
+      serviceId: map['service_id'] as int?,
+      categoryId: map['category_id'] as int?,
+      serviceTypeId: map['service_type_id'] as int?,
       categoryNameSnapshot: map['category_name_snapshot'] as String? ?? '',
+      serviceTypeNameSnapshot: map['service_type_name_snapshot'] as String?,
+      serviceNameSnapshot: map['service_name_snapshot'] as String,
       price: (map['price'] as num).toDouble(),
       quantity: map['quantity'] as int? ?? 1,
       total: (map['total'] as num).toDouble(),
+      createdAt: map['created_at'] as String?,
     );
   }
 
@@ -113,12 +125,28 @@ class VisitService {
       if (id != null) 'id': id,
       'visit_id': visitId,
       'service_id': serviceId,
-      'service_name_snapshot': serviceNameSnapshot,
+      'category_id': categoryId,
+      'service_type_id': serviceTypeId,
       'category_name_snapshot': categoryNameSnapshot,
+      'service_type_name_snapshot': serviceTypeNameSnapshot,
+      'service_name_snapshot': serviceNameSnapshot,
       'price': price,
       'quantity': quantity,
       'total': total,
+      'created_at': createdAt,
     };
+  }
+
+  /// "Category → ServiceType → Service" path derived purely from snapshot
+  /// fields (never live joins) so historical bills never change.
+  String get pathLabel {
+    final parts = <String>[
+      if (categoryNameSnapshot.isNotEmpty) categoryNameSnapshot,
+      if (serviceTypeNameSnapshot != null && serviceTypeNameSnapshot!.isNotEmpty)
+        serviceTypeNameSnapshot!,
+      serviceNameSnapshot,
+    ];
+    return parts.join(' → ');
   }
 }
 

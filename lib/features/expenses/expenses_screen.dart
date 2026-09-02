@@ -25,7 +25,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     super.initState();
     final range = DateRange.thisMonth();
     _startDate = range.start.toIso8601String();
-    _endDate = range.end.toIso8601String();
+    _endDate = range.endExclusive.toIso8601String();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<ExpenseProvider>().loadCategories();
       await context.read<ExpenseProvider>().loadExpenses(

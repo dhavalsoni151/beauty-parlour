@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart';
-import '../database/database_helper.dart';
+import '../database/database.dart';
 import '../utils/formatters.dart';
 
 class DashboardProvider extends ChangeNotifier {
-  final _db = DatabaseHelper.instance;
+  final _reportDao = ReportDao();
+
   Map<String, dynamic> _todayStats = {};
   Map<String, dynamic> _monthStats = {};
   List<Map<String, dynamic>> _salesTrend = [];
@@ -25,26 +26,26 @@ class DashboardProvider extends ChangeNotifier {
     final today = DateRange.today();
     final month = DateRange.thisMonth();
 
-    _todayStats = await _db.getDashboardStats(
+    _todayStats = await _reportDao.getDashboardStats(
       today.start.toIso8601String(),
-      today.end.toIso8601String(),
+      today.endExclusive.toIso8601String(),
     );
-    _monthStats = await _db.getDashboardStats(
+    _monthStats = await _reportDao.getDashboardStats(
       month.start.toIso8601String(),
-      month.end.toIso8601String(),
+      month.endExclusive.toIso8601String(),
     );
-    _salesTrend = await _db.getDailySalesTrend(
+    _salesTrend = await _reportDao.getDailySalesTrend(
       month.start.toIso8601String(),
-      month.end.toIso8601String(),
+      month.endExclusive.toIso8601String(),
     );
-    _topServices = await _db.getTopServices(
+    _topServices = await _reportDao.getTopServices(
       month.start.toIso8601String(),
-      month.end.toIso8601String(),
+      month.endExclusive.toIso8601String(),
       limit: 5,
     );
-    _paymentBreakdown = await _db.getPaymentMethodBreakdown(
+    _paymentBreakdown = await _reportDao.getPaymentMethodBreakdown(
       month.start.toIso8601String(),
-      month.end.toIso8601String(),
+      month.endExclusive.toIso8601String(),
     );
 
     _isLoading = false;
