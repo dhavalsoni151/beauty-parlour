@@ -29,6 +29,30 @@ class VisitDao {
     });
   }
 
+  /// Updates an existing visit's details and replaces its service lines.
+  /// Used for editing a visit (including one already paid/written off) —
+  /// since it writes to the same `visits`/`visit_services` rows the reports
+  /// and dashboard read from, every aggregate automatically reflects the edit.
+  Future<void> updateVisit(Visit visit, List<VisitService> services) async {
+    final db = await AppDatabase.instance.database;
+    await db.transaction((txn) async {
+      await txn.update(
+        'visits',
+        {...visit.toMap(), 'updated_date': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [visit.id],
+      );
+      await txn.delete('visit_services', where: 'visit_id = ?', whereArgs: [visit.id]);
+      final createdAt = DateTime.now().toIso8601String();
+      for (final s in services) {
+        final map = s.toMap()
+          ..['visit_id'] = visit.id
+          ..['created_at'] = s.createdAt ?? createdAt;
+        await txn.insert('visit_services', map);
+      }
+    });
+  }
+
   Future<Visit?> get(int id) async {
     final db = await AppDatabase.instance.database;
     final rows = await db.rawQuery('''

@@ -41,6 +41,114 @@ extension AppointmentStatusX on AppointmentStatus {
   }
 }
 
+/// One service booked as part of an appointment. Mirrors [VisitService] so
+/// that "mark completed" can carry every field straight over to the visit
+/// it creates without any lossy re-derivation.
+class AppointmentService {
+  final int? id;
+  final int appointmentId;
+  final int? serviceId;
+  final int? categoryId;
+  final int? serviceTypeId;
+  final String categoryNameSnapshot;
+  final String? serviceTypeNameSnapshot;
+  final String serviceNameSnapshot;
+  final double price;
+  final int quantity;
+  final double total;
+  final String? createdAt;
+
+  const AppointmentService({
+    this.id,
+    required this.appointmentId,
+    this.serviceId,
+    this.categoryId,
+    this.serviceTypeId,
+    required this.categoryNameSnapshot,
+    this.serviceTypeNameSnapshot,
+    required this.serviceNameSnapshot,
+    required this.price,
+    this.quantity = 1,
+    required this.total,
+    this.createdAt,
+  });
+
+  factory AppointmentService.fromMap(Map<String, dynamic> map) {
+    return AppointmentService(
+      id: map['id'] as int?,
+      appointmentId: map['appointment_id'] as int,
+      serviceId: map['service_id'] as int?,
+      categoryId: map['category_id'] as int?,
+      serviceTypeId: map['service_type_id'] as int?,
+      categoryNameSnapshot: map['category_name_snapshot'] as String? ?? '',
+      serviceTypeNameSnapshot: map['service_type_name_snapshot'] as String?,
+      serviceNameSnapshot: map['service_name_snapshot'] as String? ?? '',
+      price: (map['price'] as num? ?? 0).toDouble(),
+      quantity: map['quantity'] as int? ?? 1,
+      total: (map['total'] as num? ?? 0).toDouble(),
+      createdAt: map['created_at'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      if (id != null) 'id': id,
+      'appointment_id': appointmentId,
+      'service_id': serviceId,
+      'category_id': categoryId,
+      'service_type_id': serviceTypeId,
+      'category_name_snapshot': categoryNameSnapshot,
+      'service_type_name_snapshot': serviceTypeNameSnapshot,
+      'service_name_snapshot': serviceNameSnapshot,
+      'price': price,
+      'quantity': quantity,
+      'total': total,
+      'created_at': createdAt,
+    };
+  }
+
+  String get pathLabel {
+    final parts = <String>[
+      if (categoryNameSnapshot.isNotEmpty) categoryNameSnapshot,
+      if (serviceTypeNameSnapshot != null && serviceTypeNameSnapshot!.isNotEmpty)
+        serviceTypeNameSnapshot!,
+      serviceNameSnapshot,
+    ];
+    return parts.join(' → ');
+  }
+
+  AppointmentService copyWith({
+    int? id,
+    int? appointmentId,
+    int? serviceId,
+    int? categoryId,
+    int? serviceTypeId,
+    String? categoryNameSnapshot,
+    String? serviceTypeNameSnapshot,
+    String? serviceNameSnapshot,
+    double? price,
+    int? quantity,
+    double? total,
+    String? createdAt,
+  }) {
+    return AppointmentService(
+      id: id ?? this.id,
+      appointmentId: appointmentId ?? this.appointmentId,
+      serviceId: serviceId ?? this.serviceId,
+      categoryId: categoryId ?? this.categoryId,
+      serviceTypeId: serviceTypeId ?? this.serviceTypeId,
+      categoryNameSnapshot: categoryNameSnapshot ?? this.categoryNameSnapshot,
+      serviceTypeNameSnapshot:
+          serviceTypeNameSnapshot ?? this.serviceTypeNameSnapshot,
+      serviceNameSnapshot: serviceNameSnapshot ?? this.serviceNameSnapshot,
+      price: price ?? this.price,
+      quantity: quantity ?? this.quantity,
+      total: total ?? this.total,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+}
+
 class Appointment {
   final int? id;
   final int customerId;
@@ -61,6 +169,11 @@ class Appointment {
   String? customerName;
   String? customerPhone;
 
+  /// All services booked for this appointment. Populated by
+  /// [AppointmentDao.get]/[AppointmentDao.getAll]; not part of the flat
+  /// `appointments` row (stored in `appointment_services`).
+  List<AppointmentService> services;
+
   Appointment({
     this.id,
     required this.customerId,
@@ -79,7 +192,8 @@ class Appointment {
     this.updatedDate,
     this.customerName,
     this.customerPhone,
-  });
+    List<AppointmentService>? services,
+  }) : services = services ?? const [];
 
   factory Appointment.fromMap(Map<String, dynamic> map) {
     return Appointment(
@@ -142,6 +256,7 @@ class Appointment {
     String? updatedDate,
     String? customerName,
     String? customerPhone,
+    List<AppointmentService>? services,
   }) {
     return Appointment(
       id: id ?? this.id,
@@ -162,6 +277,7 @@ class Appointment {
       updatedDate: updatedDate ?? this.updatedDate,
       customerName: customerName ?? this.customerName,
       customerPhone: customerPhone ?? this.customerPhone,
+      services: services ?? this.services,
     );
   }
 }

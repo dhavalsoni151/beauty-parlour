@@ -480,6 +480,7 @@ class _TopServicesChart extends StatelessWidget {
           ...data.asMap().entries.map((e) {
             final s = e.value;
             final revenue = (s['revenue'] as num? ?? 0).toDouble();
+            final visits = (s['visits'] as num? ?? 0).toInt();
             final maxRevenue = (data.first['revenue'] as num? ?? 1).toDouble();
             final color = AppColors.chartColors[e.key % AppColors.chartColors.length];
             return Padding(
@@ -498,7 +499,7 @@ class _TopServicesChart extends StatelessWidget {
                       Text(AppFormatters.formatCurrency(revenue),
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
                       const SizedBox(width: 8),
-                      Text('${s['visit_count']} visits',
+                      Text('$visits visits',
                         style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
                     ],
                   ),
@@ -690,7 +691,7 @@ class _UpcomingAppointmentsSection extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${appointment.serviceNameSnapshot} • ${AppFormatters.formatDate(DateTime.parse(appointment.appointmentDate))} • ${appointment.startTime}',
+                                  '${appointment.services.length > 1 ? '${appointment.serviceNameSnapshot} +${appointment.services.length - 1} more' : appointment.serviceNameSnapshot} • ${AppFormatters.formatDate(DateTime.parse(appointment.appointmentDate))} • ${appointment.startTime}',
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AppColors.textSecondary,

@@ -2,13 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/customer_provider.dart';
 import '../../core/providers/category_provider.dart';
 import '../../core/providers/visit_provider.dart';
 import '../../core/providers/dashboard_provider.dart';
+import '../../core/providers/settings_provider.dart';
+import '../../core/providers/appointment_provider.dart';
 import '../../core/models/customer_models.dart';
 import '../../core/models/visit_models.dart';
+import '../../core/models/appointment_models.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
 
@@ -24,7 +28,14 @@ class _BillItem {
 
 class NewVisitScreen extends StatefulWidget {
   final int? preselectedCustomerId;
-  const NewVisitScreen({super.key, this.preselectedCustomerId});
+  final int? fromAppointmentId;
+  final int? editVisitId;
+  const NewVisitScreen({
+    super.key,
+    this.preselectedCustomerId,
+    this.fromAppointmentId,
+    this.editVisitId,
+  });
 
   @override
   State<NewVisitScreen> createState() => _NewVisitScreenState();
@@ -48,6 +59,15 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   bool _isSaving = false;
   int? _savedVisitId;
 
+  // Set when this screen was opened from Appointments → "Mark Completed" so
+  // the completed visit can be linked back to its source appointment.
+  Appointment? _sourceAppointment;
+
+  // Set when editing an existing visit (from the visit detail screen), so
+  // saving updates it in place instead of creating a new one.
+  Visit? _editingVisit;
+  bool get _isEditing => widget.editVisitId != null;
+
   // Visit date — defaults to today but any past/future date can be chosen
   DateTime _visitDate = DateTime.now();
 
@@ -62,7 +82,11 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
       await context.read<CategoryProvider>().loadCategories();
       await context.read<ServiceProvider>().loadServices();
       await context.read<CustomerProvider>().loadCustomers();
-      if (widget.preselectedCustomerId != null) {
+      if (widget.editVisitId != null) {
+        await _prefillForEdit(widget.editVisitId!);
+      } else if (widget.fromAppointmentId != null) {
+        await _prefillFromAppointment(widget.fromAppointmentId!);
+      } else if (widget.preselectedCustomerId != null) {
         final c = await context.read<CustomerProvider>().getCustomer(widget.preselectedCustomerId!);
         if (c != null) {
           setState(() {
@@ -76,6 +100,84 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
       final all = List<Customer>.from(context.read<CustomerProvider>().allCustomers)
         ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       setState(() => _customerSearchResults = all);
+    });
+  }
+
+  /// Loads an existing visit for editing, pre-filling the customer, services,
+  /// discount and previously paid amount. Payments already on file are kept
+  /// as-is; only the bill (services/discount/notes) and the pending balance
+  /// they leave behind can be changed.
+  Future<void> _prefillForEdit(int visitId) async {
+    final visit = await context.read<VisitProvider>().getVisit(visitId);
+    if (visit == null || !mounted) return;
+    final customer = await context.read<CustomerProvider>().getCustomer(visit.customerId);
+    if (!mounted) return;
+
+    setState(() {
+      _editingVisit = visit;
+      _selectedCustomer = customer;
+      _visitDate = DateTime.tryParse(visit.visitDate) ?? DateTime.now();
+      _discountType = visit.discountType;
+      _discountValue = visit.discountValue;
+      _discountCtrl.text = visit.discountValue == 0 ? '' : _formatNumber(visit.discountValue);
+      _paidAmount = visit.totalPaid;
+      _paidCtrl.text = visit.totalPaid == 0 ? '' : _formatNumber(visit.totalPaid);
+      _billItems
+        ..clear()
+        ..addAll(visit.services.map((vs) => _BillItem(
+              service: Service(
+                id: vs.serviceId,
+                categoryId: vs.categoryId ?? 0,
+                serviceTypeId: vs.serviceTypeId,
+                name: vs.serviceNameSnapshot,
+                defaultPrice: vs.price,
+                createdDate: DateTime.now().toIso8601String(),
+                categoryName: vs.categoryNameSnapshot,
+                serviceTypeName: vs.serviceTypeNameSnapshot,
+              ),
+              price: vs.price,
+              quantity: vs.quantity,
+            )));
+      _step = 1;
+    });
+  }
+
+  String _formatNumber(double value) =>
+      value == value.roundToDouble() ? value.toInt().toString() : value.toString();
+
+  /// Loads the source appointment and pre-fills the customer + every service
+  /// booked on it, so completing an appointment reviews/edits the same data
+  /// instead of silently creating a visit behind the scenes.
+  Future<void> _prefillFromAppointment(int appointmentId) async {
+    final appointmentProvider = context.read<AppointmentProvider>();
+    final appointment = await appointmentProvider.getAppointment(appointmentId);
+    if (appointment == null || !mounted) return;
+
+    final customer = await context.read<CustomerProvider>().getCustomer(appointment.customerId);
+    final visitServices = await appointmentProvider.buildPrefillServices(appointment);
+    if (!mounted) return;
+
+    setState(() {
+      _sourceAppointment = appointment;
+      _selectedCustomer = customer;
+      _visitDate = DateTime.tryParse(appointment.appointmentDate) ?? DateTime.now();
+      _billItems
+        ..clear()
+        ..addAll(visitServices.map((vs) => _BillItem(
+              service: Service(
+                id: vs.serviceId,
+                categoryId: vs.categoryId ?? 0,
+                serviceTypeId: vs.serviceTypeId,
+                name: vs.serviceNameSnapshot,
+                defaultPrice: vs.price,
+                createdDate: DateTime.now().toIso8601String(),
+                categoryName: vs.categoryNameSnapshot,
+                serviceTypeName: vs.serviceTypeNameSnapshot,
+              ),
+              price: vs.price,
+              quantity: vs.quantity,
+            )));
+      _step = _selectedCustomer != null ? 1 : 0;
     });
   }
 
@@ -682,7 +784,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                 const SizedBox(height: 10),
                 _PaymentMethodSelector(
                   selected: _paymentMethod,
-                  onChanged: (m) => setState(() => _paymentMethod = m),
+                  onChanged: _isEditing ? null : (m) => setState(() => _paymentMethod = m),
                 ),
                 const SizedBox(height: 20),
 
@@ -690,6 +792,26 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                 const Align(alignment: Alignment.centerLeft,
                   child: Text('Amount Paid', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
                 const SizedBox(height: 10),
+                if (_isEditing)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.divider),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline_rounded, size: 16, color: AppColors.textSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Amount paid (${AppFormatters.formatCurrency(_paidAmount)}) is unchanged here — use "Receive" on the bill to record new payments.',
+                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ]),
+                  )
+                else
                 Row(
                   children: [
                     Expanded(
@@ -775,7 +897,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                     child: _isSaving
                         ? const SizedBox(width: 20, height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : Text(_savedVisitId != null ? 'Bill Saved' : 'Save Bill',
+                        : Text(_savedVisitId != null ? 'Bill Saved' : (_isEditing ? 'Update Bill' : 'Save Bill'),
                             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   ),
                 ),
@@ -837,12 +959,13 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         _visitDate.year, _visitDate.month, _visitDate.day,
         now.hour, now.minute, now.second,
       );
-      final dateStr = visitDateTime.toIso8601String();
-      final createdStr = now.toIso8601String();
+      final dateStr = _isEditing ? _editingVisit!.visitDate : visitDateTime.toIso8601String();
+      final createdStr = _isEditing ? _editingVisit!.createdDate : now.toIso8601String();
       final paid = _paidAmount.clamp(0.0, _finalTotal);
       final pending = (_finalTotal - paid).clamp(0.0, double.infinity);
 
       final visit = Visit(
+        id: _isEditing ? _editingVisit!.id : null,
         customerId: _selectedCustomer!.id!,
         visitDate: dateStr,
         subtotal: _subtotal,
@@ -870,22 +993,34 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         createdAt: createdStr,
       )).toList();
 
-      final payments = paid > 0 ? [
-        Payment(
-          visitId: 0,
-          paymentDate: dateStr,
-          amount: paid,
-          paymentMethod: _paymentMethod,
-        )
-      ] : <Payment>[];
-
-      final visitId = await context.read<VisitProvider>().saveVisit(visit, visitServices, payments);
+      int visitId;
+      if (_isEditing) {
+        visitId = _editingVisit!.id!;
+        await context.read<VisitProvider>().updateVisit(visit, visitServices);
+      } else {
+        final payments = paid > 0 ? [
+          Payment(
+            visitId: 0,
+            paymentDate: dateStr,
+            amount: paid,
+            paymentMethod: _paymentMethod,
+          )
+        ] : <Payment>[];
+        visitId = await context.read<VisitProvider>().saveVisit(visit, visitServices, payments);
+        if (_sourceAppointment?.id != null) {
+          await context.read<AppointmentProvider>().completeWithVisit(_sourceAppointment!.id!, visitId);
+        }
+      }
       await context.read<DashboardProvider>().loadDashboard();
 
-      if (mounted) {
+      if (!mounted) return;
+      if (_isEditing) {
         setState(() { _savedVisitId = visitId; _isSaving = false; });
-        _showSuccessDialog(visitId, paid, pending);
+        context.pop(true);
+        return;
       }
+      setState(() { _savedVisitId = visitId; _isSaving = false; });
+      _showSuccessDialog(visitId, paid, pending);
     } catch (e) {
       setState(() => _isSaving = false);
       if (mounted) {
@@ -901,76 +1036,129 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: AppColors.successLight,
-                shape: BoxShape.circle,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.successLight,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 40),
               ),
-              child: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 40),
-            ),
-            const SizedBox(height: 16),
-            const Text('Visit Saved!',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-            const SizedBox(height: 12),
-            _SummaryRow('Customer', _selectedCustomer!.name),
-            _SummaryRow('Total', AppFormatters.formatCurrency(_finalTotal)),
-            _SummaryRow('Paid', AppFormatters.formatCurrency(paid)),
-            if (pending > 0)
-              _SummaryRow('Pending', AppFormatters.formatCurrency(pending), valueColor: AppColors.error),
-            const SizedBox(height: 4),
-            PaymentStatusBadge(status: _paymentStatus),
-            const SizedBox(height: 20),
-            // Action buttons
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
+              const SizedBox(height: 16),
+              const Text('Visit Saved!',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              _SummaryRow('Customer', _selectedCustomer!.name),
+              _SummaryRow('Total', AppFormatters.formatCurrency(_finalTotal)),
+              _SummaryRow('Paid', AppFormatters.formatCurrency(paid)),
+              if (pending > 0)
+                _SummaryRow('Pending', AppFormatters.formatCurrency(pending), valueColor: AppColors.error),
+              const SizedBox(height: 4),
+              PaymentStatusBadge(status: _paymentStatus),
+              const SizedBox(height: 20),
+              // Action buttons
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    context.pushReplacement('/new-visit');
+                  },
+                  child: const Text('New Visit'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _shareVisitSummary,
+                  icon: const Icon(Icons.share_rounded),
+                  label: const Text('Share on WhatsApp'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.pushReplacement('/visit/$visitId');
+                      },
+                      child: const Text('View Bill'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.pushReplacement('/customer/${_selectedCustomer!.id}/profile');
+                      },
+                      child: const Text('Customer'),
+                    ),
+                  ),
+                ],
+              ),
+              TextButton(
                 onPressed: () {
                   Navigator.pop(ctx);
-                  context.pushReplacement('/new-visit');
+                  _leaveToCustomers();
                 },
-                child: const Text('New Visit'),
+                child: const Text('Done', style: TextStyle(color: AppColors.textSecondary)),
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      context.pushReplacement('/visit/$visitId');
-                    },
-                    child: const Text('View Bill'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      context.pushReplacement('/customer/${_selectedCustomer!.id}/profile');
-                    },
-                    child: const Text('Customer'),
-                  ),
-                ),
-              ],
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _leaveToCustomers();
-              },
-              child: const Text('Done', style: TextStyle(color: AppColors.textSecondary)),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  String _buildVisitShareMessage() {
+    final customerName = _selectedCustomer?.name.trim();
+    final parlourName = context.read<SettingsProvider>().parlourName.trim();
+    final opening = (customerName?.isNotEmpty ?? false)
+        ? 'Hi $customerName, thank you for visiting ${parlourName.isNotEmpty ? parlourName : 'us'}!'
+        : 'Thank you for visiting ${parlourName.isNotEmpty ? parlourName : 'us'}!';
+
+    final lines = _billItems.map((item) {
+      final quantitySuffix = item.quantity > 1 ? ' ×${item.quantity}' : '';
+      return '• ${item.service.name}$quantitySuffix — ${AppFormatters.formatCurrency(item.total)}';
+    });
+
+    final buffer = StringBuffer()
+      ..writeln(opening)
+      ..writeln('Your visit summary:')
+      ..writeln(lines.join('\n'))
+      ..writeln('Total: ${AppFormatters.formatCurrency(_finalTotal)}');
+
+    if (_pendingAmount > 0) {
+      buffer.writeln('Pending: ${AppFormatters.formatCurrency(_pendingAmount)}');
+    }
+
+    buffer.write('See you again soon!');
+    return buffer.toString();
+  }
+
+  Future<void> _shareVisitSummary() async {
+    if (_selectedCustomer == null || _billItems.isEmpty) return;
+
+    try {
+      await Share.share(
+        _buildVisitShareMessage(),
+        subject: 'Visit Summary',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to share visit summary: $e')),
+      );
+    }
   }
 
   Widget _buildStepHeader(String title, IconData icon, {Widget? trailing}) {
@@ -1012,7 +1200,9 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   void _leaveToCustomers() => context.go('/customers');
 
   void _close() {
-    if (_savedVisitId != null) {
+    if (_isEditing) {
+      context.pop(_savedVisitId != null);
+    } else if (_savedVisitId != null) {
       _leaveToCustomers();
     } else {
       context.pop();
@@ -1022,14 +1212,14 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _savedVisitId == null,
+      canPop: _savedVisitId == null || _isEditing,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _leaveToCustomers();
+        if (!didPop && !_isEditing) _leaveToCustomers();
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-          title: const Text('New Visit'),
+          title: Text(_isEditing ? 'Edit Visit' : 'New Visit'),
           leading: IconButton(
             icon: const Icon(Icons.close_rounded),
             onPressed: _close,
@@ -1230,7 +1420,7 @@ class _ToggleButton extends StatelessWidget {
 
 class _PaymentMethodSelector extends StatelessWidget {
   final PaymentMethod selected;
-  final ValueChanged<PaymentMethod> onChanged;
+  final ValueChanged<PaymentMethod>? onChanged;
 
   const _PaymentMethodSelector({required this.selected, required this.onChanged});
 
@@ -1242,7 +1432,7 @@ class _PaymentMethodSelector extends StatelessWidget {
       children: PaymentMethodX.all.map((m) {
         final isSelected = m == selected;
         return GestureDetector(
-          onTap: () => onChanged(m),
+          onTap: onChanged == null ? null : () => onChanged!(m),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

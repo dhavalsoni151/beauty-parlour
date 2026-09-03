@@ -45,7 +45,9 @@ class AppointmentDao {
       $where
       ORDER BY a.appointment_date ASC, a.start_time ASC, a.id ASC
     ''', args);
-    return rows.map((r) => Appointment.fromMap(r)).toList();
+    final appointments = rows.map((r) => Appointment.fromMap(r)).toList();
+    await _attachServices(db, appointments);
+    return appointments;
   }
 
   Future<Appointment?> get(int id) async {
@@ -57,22 +59,78 @@ class AppointmentDao {
       WHERE a.id = ?
       LIMIT 1
     ''', [id]);
-    return rows.isEmpty ? null : Appointment.fromMap(rows.first);
+    if (rows.isEmpty) return null;
+    final appointment = Appointment.fromMap(rows.first);
+    await _attachServices(db, [appointment]);
+    return appointment;
   }
 
-  Future<int> insert(Appointment appointment) async {
-    final db = await AppDatabase.instance.database;
-    return db.insert('appointments', appointment.toMap());
-  }
-
-  Future<int> update(Appointment appointment) async {
-    final db = await AppDatabase.instance.database;
-    return db.update(
-      'appointments',
-      {...appointment.toMap(), 'updated_date': DateTime.now().toIso8601String()},
-      where: 'id = ?',
-      whereArgs: [appointment.id],
+  Future<void> _attachServices(
+      DatabaseExecutor db, List<Appointment> appointments) async {
+    if (appointments.isEmpty) return;
+    final ids = appointments.map((a) => a.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final rows = await db.rawQuery(
+      'SELECT * FROM appointment_services WHERE appointment_id IN ($placeholders) ORDER BY id ASC',
+      ids,
     );
+    final byAppointment = <int, List<AppointmentService>>{};
+    for (final row in rows) {
+      final service = AppointmentService.fromMap(row);
+      byAppointment.putIfAbsent(service.appointmentId, () => []).add(service);
+    }
+    for (final appointment in appointments) {
+      appointment.services = byAppointment[appointment.id] ?? const [];
+    }
+  }
+
+  Future<List<AppointmentService>> getServices(int appointmentId) async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.query(
+      'appointment_services',
+      where: 'appointment_id = ?',
+      whereArgs: [appointmentId],
+      orderBy: 'id ASC',
+    );
+    return rows.map((r) => AppointmentService.fromMap(r)).toList();
+  }
+
+  Future<int> insert(Appointment appointment,
+      {List<AppointmentService> services = const []}) async {
+    final db = await AppDatabase.instance.database;
+    return db.transaction((txn) async {
+      final id = await txn.insert('appointments', appointment.toMap());
+      for (final service in services) {
+        await txn.insert(
+            'appointment_services', service.copyWith(appointmentId: id).toMap());
+      }
+      return id;
+    });
+  }
+
+  Future<int> update(Appointment appointment,
+      {List<AppointmentService>? services}) async {
+    final db = await AppDatabase.instance.database;
+    return db.transaction((txn) async {
+      final result = await txn.update(
+        'appointments',
+        {...appointment.toMap(), 'updated_date': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [appointment.id],
+      );
+      if (services != null) {
+        await txn.delete('appointment_services',
+            where: 'appointment_id = ?', whereArgs: [appointment.id]);
+        for (final service in services) {
+          await txn.insert(
+            'appointment_services',
+            service.copyWith(appointmentId: appointment.id!).toMap(),
+          );
+        }
+      }
+      return result;
+    });
   }
 
   Future<void> updateStatus(int id, AppointmentStatus status, {int? visitId}) async {
@@ -104,7 +162,9 @@ class AppointmentDao {
       ORDER BY a.appointment_date ASC, a.start_time ASC, a.id ASC
       LIMIT $limit
     ''', [AppointmentStatus.pending.dbValue, today, today, time]);
-    return rows.map((r) => Appointment.fromMap(r)).toList();
+    final appointments = rows.map((r) => Appointment.fromMap(r)).toList();
+    await _attachServices(db, appointments);
+    return appointments;
   }
 
   Future<List<Appointment>> getForCustomer(int customerId) {
@@ -126,6 +186,8 @@ class AppointmentDao {
         'This appointment is already linked to a visit and cannot be deleted.',
       );
     }
+    await db.delete('appointment_services',
+        where: 'appointment_id = ?', whereArgs: [id]);
     await db.delete('appointments', where: 'id = ?', whereArgs: [id]);
   }
 

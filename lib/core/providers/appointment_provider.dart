@@ -8,7 +8,6 @@ import '../utils/formatters.dart';
 
 class AppointmentProvider extends ChangeNotifier {
   final _appointmentDao = AppointmentDao();
-  final _visitDao = VisitDao();
   final _serviceDao = ServiceDao();
   final _categoryDao = CategoryDao();
   final _serviceTypeDao = ServiceTypeDao();
@@ -63,16 +62,18 @@ class AppointmentProvider extends ChangeNotifier {
   Future<List<Appointment>> getForCustomer(int customerId) =>
       _appointmentDao.getForCustomer(customerId);
 
-  Future<int> addAppointment(Appointment appointment) async {
-    final id = await _appointmentDao.insert(appointment);
+  Future<int> addAppointment(Appointment appointment,
+      {List<AppointmentService> services = const []}) async {
+    final id = await _appointmentDao.insert(appointment, services: services);
     final saved = appointment.copyWith(id: id);
     await _notifications.scheduleAppointmentReminder(saved);
     await _reloadCurrentLists();
     return id;
   }
 
-  Future<void> updateAppointment(Appointment appointment) async {
-    await _appointmentDao.update(appointment);
+  Future<void> updateAppointment(Appointment appointment,
+      {List<AppointmentService>? services}) async {
+    await _appointmentDao.update(appointment, services: services);
     final refreshed = await _appointmentDao.get(appointment.id!);
     if (refreshed != null) {
       if (refreshed.status == AppointmentStatus.pending) {
@@ -96,73 +97,98 @@ class AppointmentProvider extends ChangeNotifier {
     await _reloadCurrentLists();
   }
 
-  Future<int> markCompleted(Appointment appointment) async {
-    final latest = await _appointmentDao.get(appointment.id!);
+  /// Builds the (unsaved) visit + visit-service prefill for "Mark Completed".
+  /// The caller (New Visit screen) shows this to the user for review/edits;
+  /// nothing is written to the database until the visit is actually saved.
+  Future<Visit> buildPrefillVisit(Appointment appointment) async {
+    final visitDate = _appointmentDateTime(appointment).toIso8601String();
+    return Visit(
+      customerId: appointment.customerId,
+      visitDate: visitDate,
+      subtotal: 0,
+      discountType: DiscountType.fixed,
+      discountValue: 0,
+      discountAmount: 0,
+      finalTotal: 0,
+      totalPaid: 0,
+      pendingAmount: 0,
+      paymentStatus: PaymentStatus.pending,
+      notes: appointment.notes,
+      createdDate: DateTime.now().toIso8601String(),
+      customerName: appointment.customerName,
+      customerPhone: appointment.customerPhone,
+    );
+  }
+
+  Future<List<VisitService>> buildPrefillServices(Appointment appointment) async {
+    if (appointment.services.isNotEmpty) {
+      return appointment.services
+          .map((s) => VisitService(
+                visitId: 0,
+                serviceId: s.serviceId,
+                categoryId: s.categoryId,
+                serviceTypeId: s.serviceTypeId,
+                categoryNameSnapshot: s.categoryNameSnapshot,
+                serviceTypeNameSnapshot: s.serviceTypeNameSnapshot,
+                serviceNameSnapshot: s.serviceNameSnapshot,
+                price: s.price,
+                quantity: s.quantity,
+                total: s.total,
+                createdAt: DateTime.now().toIso8601String(),
+              ))
+          .toList();
+    }
+
+    // Legacy fallback for appointments created before multi-service support.
+    if (appointment.serviceId == null &&
+        appointment.serviceNameSnapshot.isEmpty) {
+      return const [];
+    }
+    final service = appointment.serviceId != null
+        ? await _serviceDao.get(appointment.serviceId!)
+        : null;
+    final category = appointment.categoryId != null
+        ? await _categoryDao.get(appointment.categoryId!)
+        : null;
+    final serviceType = appointment.serviceTypeId != null
+        ? await _serviceTypeDao.get(appointment.serviceTypeId!)
+        : null;
+    final categoryName = service?.categoryName ?? category?.name ?? '';
+    final serviceTypeName = service?.serviceTypeName ?? serviceType?.name;
+    final price = service?.defaultPrice ?? 0.0;
+    return [
+      VisitService(
+        visitId: 0,
+        serviceId: appointment.serviceId,
+        categoryId: appointment.categoryId,
+        serviceTypeId: appointment.serviceTypeId,
+        categoryNameSnapshot: categoryName,
+        serviceTypeNameSnapshot: serviceTypeName,
+        serviceNameSnapshot: appointment.serviceNameSnapshot,
+        price: price,
+        total: price,
+        createdAt: DateTime.now().toIso8601String(),
+      ),
+    ];
+  }
+
+  /// Links an already-saved visit (created from the prefilled New Visit
+  /// screen) back to its source appointment and marks it completed.
+  Future<void> completeWithVisit(int appointmentId, int visitId) async {
+    final latest = await _appointmentDao.get(appointmentId);
     if (latest == null) {
       throw Exception('Appointment not found.');
     }
     if (latest.status != AppointmentStatus.pending) {
       throw Exception('Only pending appointments can be completed.');
     }
-
-    final service = latest.serviceId != null
-        ? await _serviceDao.get(latest.serviceId!)
-        : null;
-    final category = latest.categoryId != null
-        ? await _categoryDao.get(latest.categoryId!)
-        : null;
-    final serviceType = latest.serviceTypeId != null
-        ? await _serviceTypeDao.get(latest.serviceTypeId!)
-        : null;
-
-    final categoryName = service?.categoryName ?? category?.name ?? '';
-    final serviceTypeName = service?.serviceTypeName ?? serviceType?.name;
-    final price = service?.defaultPrice ?? 0.0;
-    final visitDate = _appointmentDateTime(latest).toIso8601String();
-    final createdDate = DateTime.now().toIso8601String();
-
-    final visit = Visit(
-      customerId: latest.customerId,
-      visitDate: visitDate,
-      subtotal: price,
-      discountType: DiscountType.fixed,
-      discountValue: 0,
-      discountAmount: 0,
-      finalTotal: price,
-      totalPaid: 0,
-      pendingAmount: price,
-      paymentStatus: PaymentStatus.pending,
-      notes: latest.notes,
-      createdDate: createdDate,
-      customerName: latest.customerName,
-      customerPhone: latest.customerPhone,
-    );
-
-    final visitServices = [
-      VisitService(
-        visitId: 0,
-        serviceId: latest.serviceId,
-        categoryId: latest.categoryId,
-        serviceTypeId: latest.serviceTypeId,
-        categoryNameSnapshot: categoryName,
-        serviceTypeNameSnapshot: serviceTypeName,
-        serviceNameSnapshot: latest.serviceNameSnapshot,
-        price: price,
-        total: price,
-        createdAt: createdDate,
-      ),
-    ];
-
-    final visitId =
-        await _visitDao.insertVisit(visit, visitServices, const <Payment>[]);
     await _appointmentDao.updateStatus(
-      latest.id!,
+      appointmentId,
       AppointmentStatus.completed,
       visitId: visitId,
     );
-    await _notifications.cancelReminder(latest.id!);
+    await _notifications.cancelReminder(appointmentId);
     await _reloadCurrentLists();
-    return visitId;
   }
 
   Future<void> deleteAppointment(int id) async {

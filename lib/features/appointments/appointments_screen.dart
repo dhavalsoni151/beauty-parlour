@@ -336,7 +336,9 @@ class _AppointmentCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  appointment.serviceNameSnapshot,
+                  appointment.services.length > 1
+                      ? '${appointment.serviceNameSnapshot} +${appointment.services.length - 1} more'
+                      : appointment.serviceNameSnapshot,
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -430,16 +432,13 @@ class _AppointmentCard extends StatelessWidget {
         final confirmed = await ConfirmDialog.show(
           context,
           title: 'Mark appointment completed?',
-          message: 'This will create a visit linked to the appointment.',
-          confirmLabel: 'Mark Completed',
+          message: 'You will review and confirm the visit details before it is saved.',
+          confirmLabel: 'Continue',
           confirmColor: AppColors.success,
         );
         if (!confirmed) return;
-        final visitId = await provider.markCompleted(appointment);
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Appointment completed. Visit #$visitId created.')),
-          );
+          context.push('/new-visit?fromAppointmentId=${appointment.id}');
         }
       } else if (value == 'notAttended') {
         final confirmed = await ConfirmDialog.show(

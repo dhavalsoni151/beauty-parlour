@@ -17,11 +17,17 @@ class CustomersListScreen extends StatefulWidget {
 class _CustomersListScreenState extends State<CustomersListScreen> {
   bool _showInactive = false;
 
+  Future<void> _loadCustomers() {
+    return context.read<CustomerProvider>().loadCustomers(
+          activeOnly: !_showInactive,
+        );
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CustomerProvider>().loadCustomers(activeOnly: !_showInactive);
+      _loadCustomers();
     });
   }
 
@@ -33,12 +39,16 @@ class _CustomersListScreenState extends State<CustomersListScreen> {
         title: const Text('Customers'),
         actions: [
           IconButton(
-            icon: Icon(_showInactive ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+            icon: Icon(
+              _showInactive ? Icons.people_alt : Icons.people_outline,
+            ),
             onPressed: () {
               setState(() => _showInactive = !_showInactive);
-              context.read<CustomerProvider>().loadCustomers(activeOnly: !_showInactive);
+              _loadCustomers();
             },
-            tooltip: _showInactive ? 'Hide inactive' : 'Show inactive',
+            tooltip: _showInactive
+                ? 'Hide inactive customers'
+                : 'Show inactive customers',
           ),
         ],
       ),
@@ -64,13 +74,13 @@ class _CustomersListScreenState extends State<CustomersListScreen> {
                     subtitle: 'Add your first customer to get started',
                     icon: Icons.people_rounded,
                     actionLabel: 'Add Customer',
-                    onAction: () => context.push('/customer/new').then((_) =>
-                      provider.loadCustomers()),
+                    onAction: () =>
+                        context.push('/customer/new').then((_) => _loadCustomers()),
                   );
                 }
                 return RefreshIndicator(
                   color: AppColors.primary,
-                  onRefresh: () => provider.loadCustomers(),
+                  onRefresh: _loadCustomers,
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
                     itemCount: customers.length,
@@ -84,8 +94,8 @@ class _CustomersListScreenState extends State<CustomersListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/customer/new').then((_) =>
-          context.read<CustomerProvider>().loadCustomers()),
+        onPressed: () =>
+            context.push('/customer/new').then((_) => _loadCustomers()),
         icon: const Icon(Icons.person_add_rounded),
         label: const Text('Add Customer'),
       ),

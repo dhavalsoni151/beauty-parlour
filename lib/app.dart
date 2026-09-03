@@ -49,7 +49,13 @@ final GoRouter _router = GoRouter(
       parentNavigatorKey: _rootNavigatorKey,
       builder: (c, s) {
         final customerId = s.uri.queryParameters['customerId'];
-        return NewVisitScreen(preselectedCustomerId: customerId != null ? int.tryParse(customerId) : null);
+        final fromAppointmentId = s.uri.queryParameters['fromAppointmentId'];
+        final editVisitId = s.uri.queryParameters['editVisitId'];
+        return NewVisitScreen(
+          preselectedCustomerId: customerId != null ? int.tryParse(customerId) : null,
+          fromAppointmentId: fromAppointmentId != null ? int.tryParse(fromAppointmentId) : null,
+          editVisitId: editVisitId != null ? int.tryParse(editVisitId) : null,
+        );
       },
     ),
     GoRoute(

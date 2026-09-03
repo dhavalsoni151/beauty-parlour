@@ -2,10 +2,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database.dart';
+import '../../core/providers/customer_provider.dart';
+import '../../core/providers/category_provider.dart';
+import '../../core/providers/service_provider.dart';
+import '../../core/providers/visit_provider.dart';
+import '../../core/providers/appointment_provider.dart';
+import '../../core/providers/expense_provider.dart';
+import '../../core/providers/dashboard_provider.dart';
 import '../../shared/widgets/app_widgets.dart';
 
 class BackupRestoreScreen extends StatefulWidget {
@@ -208,18 +216,31 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         allowedExtensions: ['json'],
       );
       if (result == null || result.path == null) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Restore cancelled — no file was selected.';
+        });
         return;
       }
 
       final file = File(result.path!);
       final jsonStr = await file.readAsString();
-      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      Map<String, dynamic> data;
+      try {
+        data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      } on FormatException catch (e) {
+        setState(() {
+          _statusMessage = 'Error restoring backup: the selected file is not valid JSON ($e).';
+        });
+        return;
+      }
 
       // importData auto-detects the schema: new schema is restored directly,
       // while legacy flat JSON is routed through the Category→ServiceType
       // migration mapping, producing a MigrationReport.
       final report = await BackupService().importData(data);
+      if (!mounted) return;
+      await _reloadAppState();
       if (!mounted) return;
       await _showReport(report);
       setState(() {
@@ -234,6 +255,21 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+
+  /// Re-fetches every provider's cached data after a restore so the rest of
+  /// the app (dashboard, lists, reports) immediately reflects the restored
+  /// database instead of showing stale in-memory state.
+  Future<void> _reloadAppState() async {
+    await Future.wait([
+      context.read<CustomerProvider>().loadCustomers(),
+      context.read<CategoryProvider>().loadCategories(),
+      context.read<ServiceProvider>().loadServices(),
+      context.read<VisitProvider>().loadVisits(),
+      context.read<AppointmentProvider>().loadAppointments(),
+      context.read<ExpenseProvider>().loadExpenses(),
+      context.read<DashboardProvider>().loadDashboard(),
+    ]);
   }
 
   Future<void> _showReport(MigrationReport report) async {
