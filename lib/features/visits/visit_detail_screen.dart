@@ -69,6 +69,9 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
           // Customer & date header
           _buildHeader(v),
           const SizedBox(height: 16),
+          // Package summary (financial impact of the package, if any)
+          if (v.hasPackage) _buildPackageCard(v),
+          if (v.hasPackage) const SizedBox(height: 12),
           // Services
           _buildServicesCard(v),
           const SizedBox(height: 12),
@@ -156,9 +159,10 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
                         Text(s.serviceTypeNameSnapshot!,
                             style: const TextStyle(
                                 fontSize: 10, color: AppColors.textHint)),
-                      Text(s.serviceNameSnapshot,
-                          style: const TextStyle(
-                              fontSize: 13, color: AppColors.textPrimary)),
+                      Text(s.isPackageItem ? '${s.serviceNameSnapshot} (Package)' : s.serviceNameSnapshot,
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: s.isPackageItem ? AppColors.accent : AppColors.textPrimary)),
                     ],
                   ),
                 ),
@@ -189,6 +193,43 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
             Text(AppFormatters.formatCurrency(v.finalTotal),
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.primary)),
           ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPackageCard(Visit v) {
+    final additionalTotal = v.subtotal - (v.packagePrice ?? 0);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.accentLight.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.accent.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.card_giftcard_rounded, size: 18, color: AppColors.accent),
+              const SizedBox(width: 8),
+              Expanded(child: Text(v.packageNameSnapshot ?? 'Package',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary))),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _InfoRow('Actual Service Amount', AppFormatters.formatCurrency(v.packageNormalTotal ?? 0)),
+          const SizedBox(height: 6),
+          _InfoRow('Package Discount', '- ${AppFormatters.formatCurrency(v.packageDiscount ?? 0)}',
+            valueColor: AppColors.success),
+          const SizedBox(height: 6),
+          _InfoRow('Package Amount', AppFormatters.formatCurrency(v.packagePrice ?? 0),
+            valueColor: AppColors.primary),
+          if (additionalTotal > 0) ...[
+            const SizedBox(height: 6),
+            _InfoRow('Additional Services', AppFormatters.formatCurrency(additionalTotal)),
+          ],
         ],
       ),
     );

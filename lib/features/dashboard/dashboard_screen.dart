@@ -191,6 +191,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           _TopServicesChart(data: dash.topServices),
           const SizedBox(height: 20),
 
+          // Package KPIs
+          const SectionHeader(title: 'Packages (This Month)'),
+          const SizedBox(height: 12),
+          _PackageStats(stats: dash.monthPackageStats),
+          const SizedBox(height: 20),
+
           // Payment breakdown
           _PaymentMethodChart(data: dash.paymentBreakdown),
           const SizedBox(height: 80),
@@ -368,6 +374,67 @@ class _MonthStats extends StatelessWidget {
               icon: Icons.replay_rounded,
               color: AppColors.info,
             )),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PackageStats extends StatelessWidget {
+  final Map<String, dynamic> stats;
+  const _PackageStats({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: StatCard(
+              title: 'Packages Sold',
+              value: '${stats['packages_sold'] ?? 0}',
+              icon: Icons.card_giftcard_rounded,
+              color: AppColors.accent,
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: StatCard(
+              title: 'Package Revenue',
+              value: AppFormatters.formatCurrency((stats['package_revenue'] as num? ?? 0).toDouble()),
+              icon: Icons.account_balance_wallet_rounded,
+              color: AppColors.primary,
+            )),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: StatCard(
+              title: 'Package Discount',
+              value: AppFormatters.formatCurrency((stats['package_discount'] as num? ?? 0).toDouble()),
+              icon: Icons.percent_rounded,
+              color: AppColors.success,
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: StatCard(
+              title: 'Active Packages',
+              value: '${stats['active_packages'] ?? 0}',
+              icon: Icons.check_circle_rounded,
+              color: AppColors.info,
+            )),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: StatCard(
+              title: 'Expiring Soon',
+              value: '${stats['packages_expiring_soon'] ?? 0}',
+              icon: Icons.warning_amber_rounded,
+              color: AppColors.warning,
+            )),
+            const SizedBox(width: 12),
+            const Expanded(child: SizedBox.shrink()),
           ],
         ),
       ],
