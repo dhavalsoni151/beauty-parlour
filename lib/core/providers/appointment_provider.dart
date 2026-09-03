@@ -117,6 +117,11 @@ class AppointmentProvider extends ChangeNotifier {
       createdDate: DateTime.now().toIso8601String(),
       customerName: appointment.customerName,
       customerPhone: appointment.customerPhone,
+      packageId: appointment.packageId,
+      packageNameSnapshot: appointment.packageNameSnapshot,
+      packageNormalTotal: appointment.packageNormalTotal,
+      packagePrice: appointment.packagePrice,
+      packageDiscount: appointment.packageDiscount,
     );
   }
 
@@ -135,6 +140,9 @@ class AppointmentProvider extends ChangeNotifier {
                 quantity: s.quantity,
                 total: s.total,
                 createdAt: DateTime.now().toIso8601String(),
+                isPackageItem: s.isPackageItem,
+                packageId: s.packageId,
+                normalPriceSnapshot: s.normalPriceSnapshot,
               ))
           .toList();
     }

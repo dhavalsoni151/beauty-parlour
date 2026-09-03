@@ -5,11 +5,14 @@ import 'package:provider/provider.dart';
 import '../../core/database/database.dart';
 import '../../core/models/appointment_models.dart';
 import '../../core/models/customer_models.dart';
+import '../../core/models/package_models.dart';
 import '../../core/providers/appointment_provider.dart';
 import '../../core/providers/category_provider.dart';
 import '../../core/providers/customer_provider.dart';
+import '../../core/providers/package_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../packages/package_picker_sheet.dart';
 
 class AppointmentFormScreen extends StatefulWidget {
   final int? appointmentId;
@@ -40,6 +43,12 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
   int _selectedServiceTypeValue = _directServiceTypeValue;
   Service? _selectedService;
   final List<_AppointmentServiceEntry> _selectedServices = [];
+
+  /// The package currently applied to this appointment (its services are
+  /// mirrored into [_selectedServices] with `packageId` set). Only one
+  /// package can be active per appointment; additional individual services
+  /// can still be added alongside it.
+  Package? _selectedPackage;
   DateTime _appointmentDate = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -118,7 +127,34 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
           serviceName: s.serviceNameSnapshot,
           price: s.price,
           quantity: s.quantity,
+          packageId: s.isPackageItem ? s.packageId : null,
+          normalPrice: s.isPackageItem ? (s.normalPriceSnapshot ?? s.price) : null,
         ));
+      }
+      if (_existingAppointment!.hasPackage) {
+        _selectedPackage = Package(
+          id: _existingAppointment!.packageId,
+          name: _existingAppointment!.packageNameSnapshot ?? 'Package',
+          packagePrice: _existingAppointment!.packagePrice ?? 0,
+          startDate: '',
+          expiryDate: '',
+          createdDate: _existingAppointment!.createdDate,
+          services: _selectedServices
+              .where((e) => e.packageId == _existingAppointment!.packageId)
+              .map((e) => PackageService(
+                    packageId: _existingAppointment!.packageId!,
+                    serviceId: e.serviceId,
+                    categoryId: e.categoryId,
+                    serviceTypeId: e.serviceTypeId,
+                    categoryNameSnapshot: e.categoryName,
+                    serviceTypeNameSnapshot: e.serviceTypeName,
+                    serviceNameSnapshot: e.serviceName,
+                    normalPrice: e.normalPrice ?? e.price,
+                    packageServiceAmount: e.price,
+                    quantity: e.quantity,
+                  ))
+              .toList(),
+        );
       }
     }
 
@@ -215,6 +251,19 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
       }
 
       final firstService = _selectedServices.first;
+      double? packageNormalTotal;
+      double? packagePrice;
+      double? packageDiscount;
+      String? packageNameSnapshot;
+      if (_selectedPackage != null) {
+        packageNormalTotal = _selectedPackage!.services
+            .fold(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
+        packagePrice = _selectedServices
+            .where((e) => e.packageId == _selectedPackage!.id)
+            .fold(0.0, (sum, e) => sum + e.total);
+        packageDiscount = packageNormalTotal - packagePrice;
+        packageNameSnapshot = _selectedPackage!.name;
+      }
       final appointment = Appointment(
         id: _existingAppointment?.id,
         customerId: _selectedCustomer!.id!,
@@ -236,6 +285,11 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
             : DateTime.now().toIso8601String(),
         customerName: _selectedCustomer!.name,
         customerPhone: _selectedCustomer!.phone,
+        packageId: _selectedPackage?.id,
+        packageNameSnapshot: packageNameSnapshot,
+        packageNormalTotal: packageNormalTotal,
+        packagePrice: packagePrice,
+        packageDiscount: packageDiscount,
       );
 
       final serviceRows = _selectedServices
@@ -251,6 +305,9 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                 quantity: s.quantity,
                 total: s.total,
                 createdAt: DateTime.now().toIso8601String(),
+                isPackageItem: s.isPackageItem,
+                packageId: s.packageId,
+                normalPriceSnapshot: s.normalPrice,
               ))
           .toList();
 
@@ -294,17 +351,68 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
   }
 
   void _removeSelectedService(int index) {
-    setState(() => _selectedServices.removeAt(index));
+    setState(() {
+      if (_selectedServices[index].isPackageItem) {
+        _removePackage();
+      } else {
+        _selectedServices.removeAt(index);
+      }
+    });
   }
 
   void _changeSelectedServiceQuantity(int index, int delta) {
     setState(() {
       final item = _selectedServices[index];
+      if (item.isPackageItem) return; // package quantities are fixed at selection time
       final next = item.quantity + delta;
       if (next <= 0) {
         _selectedServices.removeAt(index);
       } else {
         item.quantity = next;
+      }
+    });
+  }
+
+  /// Removes all services that belong to the currently-selected package and
+  /// clears the package selection. Does NOT touch the service master data.
+  void _removePackage() {
+    _selectedServices.removeWhere((e) => e.isPackageItem);
+    _selectedPackage = null;
+  }
+
+  /// Opens the package picker for the current appointment date, re-validates
+  /// the chosen package, then replaces any previously-selected package with
+  /// the newly chosen one and auto-adds its services.
+  Future<void> _addPackage() async {
+    final dateStr = _dateOnly(_appointmentDate);
+    final picked = await showPackagePickerSheet(context, dateStr);
+    if (picked == null || !mounted) return;
+
+    final validation =
+        await context.read<PackageProvider>().validate(picked.id!, dateStr);
+    if (!validation.isValid || validation.package == null) {
+      if (!mounted) return;
+      _showMessage(validation.message ?? 'This package is not valid for the selected date.');
+      return;
+    }
+    final validated = validation.package!;
+
+    setState(() {
+      _removePackage();
+      _selectedPackage = validated;
+      for (final ps in validated.services) {
+        _selectedServices.add(_AppointmentServiceEntry(
+          serviceId: ps.serviceId,
+          categoryId: ps.categoryId,
+          serviceTypeId: ps.serviceTypeId,
+          categoryName: ps.categoryNameSnapshot,
+          serviceTypeName: ps.serviceTypeNameSnapshot,
+          serviceName: ps.serviceNameSnapshot,
+          price: ps.packageServiceAmount,
+          quantity: ps.quantity,
+          packageId: validated.id,
+          normalPrice: ps.normalPrice,
+        ));
       }
     });
   }
@@ -319,8 +427,9 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(item.serviceName,
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                Text(item.isPackageItem ? '${item.serviceName} (Package)' : item.serviceName,
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13,
+                      color: item.isPackageItem ? AppColors.accent : AppColors.textPrimary)),
                 Text(
                   AppFormatters.formatCurrency(item.price),
                   style: const TextStyle(fontSize: 12, color: AppColors.textHint),
@@ -328,19 +437,76 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
               ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
-            onPressed: () => _changeSelectedServiceQuantity(index, -1),
-          ),
-          Text('${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w600)),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
-            onPressed: () => _changeSelectedServiceQuantity(index, 1),
-          ),
+          if (item.isPackageItem)
+            Text('×${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w600))
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
+              onPressed: () => _changeSelectedServiceQuantity(index, -1),
+            ),
+            Text('${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w600)),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+              onPressed: () => _changeSelectedServiceQuantity(index, 1),
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.error),
             onPressed: () => _removeSelectedService(index),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPackageSummaryBlock() {
+    final pkg = _selectedPackage!;
+    final normalTotal = pkg.services.fold(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
+    final packageAmount = _selectedServices
+        .where((e) => e.packageId == pkg.id)
+        .fold(0.0, (sum, e) => sum + e.total);
+    final discount = normalTotal - packageAmount;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.accentLight.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.accent.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.card_giftcard_rounded, size: 16, color: AppColors.accent),
+              const SizedBox(width: 6),
+              Expanded(child: Text(pkg.name,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _packageSummaryRow('Actual Service Amount', normalTotal, strike: true),
+          _packageSummaryRow('Package Price', packageAmount, color: AppColors.primary, bold: true),
+          _packageSummaryRow('Package Discount', discount, color: AppColors.success),
+        ],
+      ),
+    );
+  }
+
+  Widget _packageSummaryRow(String label, double value, {bool strike = false, Color? color, bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+          Text(AppFormatters.formatCurrency(value),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+              color: color ?? AppColors.textPrimary,
+              decoration: strike ? TextDecoration.lineThrough : null,
+            )),
         ],
       ),
     );
@@ -459,6 +625,16 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                     title: 'Service',
                     child: Column(
                       children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _addPackage,
+                            icon: const Icon(Icons.card_giftcard_rounded, color: AppColors.accent),
+                            label: const Text('Add Package'),
+                            style: OutlinedButton.styleFrom(foregroundColor: AppColors.accent),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedCategory?.id,
                           decoration: const InputDecoration(
@@ -550,6 +726,7 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                           const SizedBox(height: 16),
                           const Divider(height: 1),
                           const SizedBox(height: 12),
+                          if (_selectedPackage != null) _buildPackageSummaryBlock(),
                           Column(
                             children: [
                               for (int i = 0; i < _selectedServices.length; i++)
@@ -814,6 +991,13 @@ class _AppointmentServiceEntry {
   final double price;
   int quantity;
 
+  /// Set when this entry was auto-added as part of a package; [normalPrice]
+  /// preserves the service's own default price alongside the (possibly
+  /// discounted) package [price] without ever touching the service master.
+  final int? packageId;
+  final double? normalPrice;
+  bool get isPackageItem => packageId != null;
+
   _AppointmentServiceEntry({
     this.serviceId,
     this.categoryId,
@@ -823,6 +1007,8 @@ class _AppointmentServiceEntry {
     required this.serviceName,
     required this.price,
     this.quantity = 1,
+    this.packageId,
+    this.normalPrice,
   });
 
   double get total => price * quantity;

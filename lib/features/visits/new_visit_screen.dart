@@ -14,15 +14,32 @@ import '../../core/providers/appointment_provider.dart';
 import '../../core/models/customer_models.dart';
 import '../../core/models/visit_models.dart';
 import '../../core/models/appointment_models.dart';
+import '../../core/models/package_models.dart';
+import '../../core/providers/package_provider.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
+import '../packages/package_picker_sheet.dart';
 
 class _BillItem {
   final Service service;
   double price;
   int quantity;
 
-  _BillItem({required this.service, required this.price, this.quantity = 1});
+  /// Set when this line was auto-added as part of a package. The service's
+  /// own normal/default price is kept separately in [normalPrice] so it can
+  /// be shown alongside the (possibly discounted) package [price] without
+  /// ever overwriting the service master's default price.
+  final int? packageId;
+  final double? normalPrice;
+  bool get isPackageItem => packageId != null;
+
+  _BillItem({
+    required this.service,
+    required this.price,
+    this.quantity = 1,
+    this.packageId,
+    this.normalPrice,
+  });
 
   double get total => price * quantity;
 }
@@ -52,6 +69,12 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
 
   Customer? _selectedCustomer;
   final List<_BillItem> _billItems = [];
+
+  /// The package currently applied to this visit (its bundled services are
+  /// mirrored into [_billItems] with `packageId` set). Only one package can
+  /// be active per visit; additional individual services can still be added
+  /// alongside it.
+  Package? _selectedPackage;
 
   DiscountType _discountType = DiscountType.fixed;
   double _discountValue = 0;
@@ -142,9 +165,43 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
               ),
               price: vs.price,
               quantity: vs.quantity,
+              packageId: vs.isPackageItem ? vs.packageId : null,
+              normalPrice: vs.isPackageItem ? (vs.normalPriceSnapshot ?? vs.price) : null,
             )));
+      _selectedPackage = _packageSnapshotFromVisit(visit);
       _step = 1;
     });
+  }
+
+  /// Reconstructs a lightweight, read-only [Package] from a visit's own
+  /// historical snapshot fields (never from the live `packages` table), so
+  /// editing an old visit keeps displaying/using exactly what was charged at
+  /// the time — even if the package was later edited, deactivated or deleted.
+  Package? _packageSnapshotFromVisit(Visit visit) {
+    if (!visit.hasPackage) return null;
+    final packageItems = _billItems.where((b) => b.packageId == visit.packageId);
+    return Package(
+      id: visit.packageId,
+      name: visit.packageNameSnapshot ?? 'Package',
+      packagePrice: visit.packagePrice ?? 0,
+      startDate: '',
+      expiryDate: '',
+      createdDate: visit.createdDate,
+      services: packageItems
+          .map((b) => PackageService(
+                packageId: visit.packageId!,
+                serviceId: b.service.id,
+                categoryId: b.service.categoryId,
+                serviceTypeId: b.service.serviceTypeId,
+                categoryNameSnapshot: b.service.categoryName ?? '',
+                serviceTypeNameSnapshot: b.service.serviceTypeName,
+                serviceNameSnapshot: b.service.name,
+                normalPrice: b.normalPrice ?? b.price,
+                packageServiceAmount: b.price,
+                quantity: b.quantity,
+              ))
+          .toList(),
+    );
   }
 
   String _formatNumber(double value) =>
@@ -181,7 +238,34 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
               ),
               price: vs.price,
               quantity: vs.quantity,
+              packageId: vs.isPackageItem ? vs.packageId : null,
+              normalPrice: vs.isPackageItem ? (vs.normalPriceSnapshot ?? vs.price) : null,
             )));
+      _selectedPackage = appointment.hasPackage
+          ? Package(
+              id: appointment.packageId,
+              name: appointment.packageNameSnapshot ?? 'Package',
+              packagePrice: appointment.packagePrice ?? 0,
+              startDate: '',
+              expiryDate: '',
+              createdDate: DateTime.now().toIso8601String(),
+              services: _billItems
+                  .where((b) => b.packageId == appointment.packageId)
+                  .map((b) => PackageService(
+                        packageId: appointment.packageId!,
+                        serviceId: b.service.id,
+                        categoryId: b.service.categoryId,
+                        serviceTypeId: b.service.serviceTypeId,
+                        categoryNameSnapshot: b.service.categoryName ?? '',
+                        serviceTypeNameSnapshot: b.service.serviceTypeName,
+                        serviceNameSnapshot: b.service.name,
+                        normalPrice: b.normalPrice ?? b.price,
+                        packageServiceAmount: b.price,
+                        quantity: b.quantity,
+                      ))
+                  .toList(),
+            )
+          : null;
       _step = _selectedCustomer != null ? 1 : 0;
     });
   }
@@ -422,10 +506,20 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
             _buildStepHeader(
               'Add Services',
               Icons.spa_rounded,
-              trailing: IconButton(
-                icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary),
-                tooltip: 'Add New Service',
-                onPressed: () => _showAddServiceDialog(catProvider, svcProvider),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.card_giftcard_rounded, color: AppColors.accent),
+                    tooltip: 'Add Package',
+                    onPressed: _addPackage,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary),
+                    tooltip: 'Add New Service',
+                    onPressed: () => _showAddServiceDialog(catProvider, svcProvider),
+                  ),
+                ],
               ),
             ),
             // Customer chip
@@ -778,11 +872,127 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     setState(() {
       final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
       if (idx >= 0) {
-        _billItems.removeAt(idx);
+        if (_billItems[idx].isPackageItem) {
+          _removePackage();
+        } else {
+          _billItems.removeAt(idx);
+        }
       } else {
         _billItems.add(_BillItem(service: svc, price: svc.defaultPrice));
       }
     });
+  }
+
+  /// Removes all services that belong to the currently-selected package and
+  /// clears the package selection. Does NOT touch the service master data.
+  void _removePackage() {
+    _billItems.removeWhere((b) => b.isPackageItem);
+    _selectedPackage = null;
+  }
+
+  /// Opens the package picker for the current visit date, re-validates the
+  /// chosen package (business rule: validate again on every use), then
+  /// replaces any previously-selected package with the newly chosen one and
+  /// auto-adds its services to the bill.
+  Future<void> _addPackage() async {
+    final dateStr = _visitDate.toIso8601String();
+    final picked = await showPackagePickerSheet(context, dateStr);
+    if (picked == null || !mounted) return;
+
+    final validation =
+        await context.read<PackageProvider>().validate(picked.id!, dateStr);
+    if (!validation.isValid || validation.package == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(validation.message ?? 'This package is not valid for the selected date.')),
+      );
+      return;
+    }
+    final validated = validation.package!;
+
+    setState(() {
+      _removePackage();
+      _selectedPackage = validated;
+      for (final ps in validated.services) {
+        _billItems.add(_BillItem(
+          service: Service(
+            id: ps.serviceId,
+            categoryId: ps.categoryId ?? 0,
+            serviceTypeId: ps.serviceTypeId,
+            name: ps.serviceNameSnapshot,
+            defaultPrice: ps.normalPrice,
+            createdDate: DateTime.now().toIso8601String(),
+            categoryName: ps.categoryNameSnapshot,
+            serviceTypeName: ps.serviceTypeNameSnapshot,
+          ),
+          price: ps.packageServiceAmount,
+          quantity: ps.quantity,
+          packageId: validated.id,
+          normalPrice: ps.normalPrice,
+        ));
+      }
+    });
+  }
+
+  Widget _buildPackageSummaryBlock() {
+    final pkg = _selectedPackage!;
+    final normalTotal = pkg.services.fold(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
+    final packageAmount = _billItems
+        .where((b) => b.packageId == pkg.id)
+        .fold(0.0, (sum, b) => sum + b.total);
+    final discount = normalTotal - packageAmount;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.accentLight.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.accent.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.card_giftcard_rounded, size: 16, color: AppColors.accent),
+              const SizedBox(width: 6),
+              Expanded(child: Text(pkg.name,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.textHint),
+                tooltip: 'Remove Package',
+                onPressed: () => setState(_removePackage),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _packageSummaryRow('Actual Service Amount', normalTotal, strike: true),
+          _packageSummaryRow('Package Price', packageAmount, color: AppColors.primary, bold: true),
+          _packageSummaryRow('Package Discount', discount, color: AppColors.success),
+          const Divider(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _packageSummaryRow(String label, double value, {bool strike = false, Color? color, bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+          Text(AppFormatters.formatCurrency(value),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+              color: color ?? AppColors.textPrimary,
+              decoration: strike ? TextDecoration.lineThrough : null,
+            )),
+        ],
+      ),
+    );
   }
 
   Widget _buildBillSummary() {
@@ -802,12 +1012,15 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
           const Text('Bill Summary',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           const SizedBox(height: 10),
+          if (_selectedPackage != null) _buildPackageSummaryBlock(),
           ..._billItems.map((item) => Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Row(
               children: [
-                Expanded(child: Text(item.service.name,
-                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary))),
+                Expanded(child: Text(
+                  item.isPackageItem ? '${item.service.name} (Package)' : item.service.name,
+                  style: TextStyle(fontSize: 13,
+                    color: item.isPackageItem ? AppColors.accent : AppColors.textSecondary))),
                 if (item.quantity > 1) Text('×${item.quantity} ', style: const TextStyle(fontSize: 12, color: AppColors.textHint)),
                 Text(AppFormatters.formatCurrency(item.total),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
@@ -1176,6 +1389,45 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
       final paid = _paidAmount.clamp(0.0, _finalTotal);
       final pending = (_finalTotal - paid).clamp(0.0, double.infinity);
 
+      // Re-validate the package right before it is actually processed/saved —
+      // it may have been selected earlier while valid, but the visit date or
+      // the package itself (active flag, validity window) could have changed
+      // since then. This never touches service master prices.
+      double? packageNormalTotal;
+      double? packagePrice;
+      double? packageDiscount;
+      String? packageNameSnapshot;
+      if (_selectedPackage != null) {
+        Package? validated = _selectedPackage;
+        // Only re-validate against the *current* package master when creating
+        // a brand-new visit. Editing an existing (already-historical) visit
+        // must keep using the previously-selected/prefilled snapshot so that
+        // later package changes (or expiry) never alter past transactions.
+        if (!_isEditing) {
+          final validation = await context
+              .read<PackageProvider>()
+              .validate(_selectedPackage!.id!, dateStr);
+          if (!validation.isValid || validation.package == null) {
+            setState(() => _isSaving = false);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(validation.message ??
+                    'This package is no longer valid for the selected date.'),
+              ));
+            }
+            return;
+          }
+          validated = validation.package!;
+        }
+        packageNormalTotal = validated!.services
+            .fold(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
+        packagePrice = _billItems
+            .where((b) => b.packageId == validated!.id)
+            .fold(0.0, (sum, b) => sum + b.total);
+        packageDiscount = packageNormalTotal - packagePrice;
+        packageNameSnapshot = validated.name;
+      }
+
       final visit = Visit(
         id: _isEditing ? _editingVisit!.id : null,
         customerId: _selectedCustomer!.id!,
@@ -1189,6 +1441,11 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         pendingAmount: pending,
         paymentStatus: _paymentStatus,
         createdDate: createdStr,
+        packageId: _selectedPackage?.id,
+        packageNameSnapshot: packageNameSnapshot,
+        packageNormalTotal: packageNormalTotal,
+        packagePrice: packagePrice,
+        packageDiscount: packageDiscount,
       );
 
       final visitServices = _billItems.map((item) => VisitService(
@@ -1203,7 +1460,11 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         quantity: item.quantity,
         total: item.total,
         createdAt: createdStr,
+        isPackageItem: item.isPackageItem,
+        packageId: item.packageId,
+        normalPriceSnapshot: item.normalPrice,
       )).toList();
+
 
       int visitId;
       if (_isEditing) {
