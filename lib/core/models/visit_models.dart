@@ -83,10 +83,22 @@ class VisitService {
   final String categoryNameSnapshot;
   final String? serviceTypeNameSnapshot;
   final String serviceNameSnapshot;
-  final double price; // unit price
+  final double price; // unit price actually charged (package amount if part of a package)
   final int quantity;
   final double total;
   final String? createdAt;
+
+  /// True if this line was added as part of a package (see [Package]). The
+  /// amount charged is already reflected in [price]/[total] so existing
+  /// revenue aggregates keep working unmodified; this flag and
+  /// [normalPriceSnapshot] are only consumed by package-aware reports.
+  final bool isPackageItem;
+  final int? packageId;
+
+  /// The service's own normal/default price at the time it was billed.
+  /// Null for regular (non-package) lines, where [price] already is the
+  /// normal price.
+  final double? normalPriceSnapshot;
 
   const VisitService({
     this.id,
@@ -101,6 +113,9 @@ class VisitService {
     this.quantity = 1,
     required this.total,
     this.createdAt,
+    this.isPackageItem = false,
+    this.packageId,
+    this.normalPriceSnapshot,
   });
 
   factory VisitService.fromMap(Map<String, dynamic> map) {
@@ -117,6 +132,9 @@ class VisitService {
       quantity: map['quantity'] as int? ?? 1,
       total: (map['total'] as num).toDouble(),
       createdAt: map['created_at'] as String?,
+      isPackageItem: (map['is_package_item'] as int? ?? 0) == 1,
+      packageId: map['package_id'] as int?,
+      normalPriceSnapshot: (map['normal_price_snapshot'] as num?)?.toDouble(),
     );
   }
 
@@ -134,6 +152,9 @@ class VisitService {
       'quantity': quantity,
       'total': total,
       'created_at': createdAt,
+      'is_package_item': isPackageItem ? 1 : 0,
+      'package_id': packageId,
+      'normal_price_snapshot': normalPriceSnapshot,
     };
   }
 
@@ -165,6 +186,15 @@ class Visit {
   final String? notes;
   final String createdDate;
 
+  /// Package snapshot (null when no package was used on this visit). Once
+  /// set, these values are frozen — later edits to the package master never
+  /// change them (see `PackageDao`/`packages` table).
+  final int? packageId;
+  final String? packageNameSnapshot;
+  final double? packageNormalTotal;
+  final double? packagePrice;
+  final double? packageDiscount;
+
   // Joined fields
   String? customerName;
   String? customerPhone;
@@ -185,11 +215,18 @@ class Visit {
     required this.paymentStatus,
     this.notes,
     required this.createdDate,
+    this.packageId,
+    this.packageNameSnapshot,
+    this.packageNormalTotal,
+    this.packagePrice,
+    this.packageDiscount,
     this.customerName,
     this.customerPhone,
     this.services = const [],
     this.payments = const [],
   });
+
+  bool get hasPackage => packageId != null;
 
   factory Visit.fromMap(Map<String, dynamic> map) {
     return Visit(
@@ -206,6 +243,11 @@ class Visit {
       paymentStatus: PaymentStatusX.fromString(map['payment_status'] as String? ?? 'PENDING'),
       notes: map['notes'] as String?,
       createdDate: map['created_date'] as String,
+      packageId: map['package_id'] as int?,
+      packageNameSnapshot: map['package_name_snapshot'] as String?,
+      packageNormalTotal: (map['package_normal_total'] as num?)?.toDouble(),
+      packagePrice: (map['package_price'] as num?)?.toDouble(),
+      packageDiscount: (map['package_discount'] as num?)?.toDouble(),
       customerName: map['customer_name'] as String?,
       customerPhone: map['customer_phone'] as String?,
     );
@@ -226,6 +268,11 @@ class Visit {
       'payment_status': paymentStatus.dbValue,
       'notes': notes,
       'created_date': createdDate,
+      'package_id': packageId,
+      'package_name_snapshot': packageNameSnapshot,
+      'package_normal_total': packageNormalTotal,
+      'package_price': packagePrice,
+      'package_discount': packageDiscount,
     };
   }
 
@@ -250,6 +297,11 @@ class Visit {
       paymentStatus: paymentStatus ?? this.paymentStatus,
       notes: notes,
       createdDate: createdDate,
+      packageId: packageId,
+      packageNameSnapshot: packageNameSnapshot,
+      packageNormalTotal: packageNormalTotal,
+      packagePrice: packagePrice,
+      packageDiscount: packageDiscount,
       customerName: customerName,
       customerPhone: customerPhone,
       services: services,

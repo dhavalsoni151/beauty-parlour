@@ -189,6 +189,7 @@ class _MoreNavItem extends StatelessWidget {
   Widget _buildMenuGrid(BuildContext context) {
     final items = [
       ('Services', Icons.spa_rounded, '/categories', AppColors.secondary),
+      ('Packages', Icons.card_giftcard_rounded, '/packages', AppColors.accent),
       ('Appointments', Icons.event_rounded, '/appointments', AppColors.primary),
       ('Expenses', Icons.receipt_long_rounded, '/expenses', AppColors.warning),
       ('Pending', Icons.pending_actions_rounded, '/pending-payments', AppColors.error),

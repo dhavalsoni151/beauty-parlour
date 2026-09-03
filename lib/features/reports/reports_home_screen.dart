@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database.dart';
+import '../../core/models/package_models.dart';
 import '../../core/providers/appointment_provider.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
@@ -18,6 +20,7 @@ class ReportsHomeScreen extends StatefulWidget {
 class _ReportsHomeScreenState extends State<ReportsHomeScreen>
     with SingleTickerProviderStateMixin {
   final _reportDao = ReportDao();
+  final _packageDao = PackageDao();
   late TabController _tabController;
 
   DateRange _currentRange = DateRange.thisMonth();
@@ -36,12 +39,16 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
   List<Map<String, dynamic>> _expenseByCategory = [];
   List<Map<String, dynamic>> _birthdays = [];
   Map<String, dynamic> _appointmentStats = {};
+  List<Map<String, dynamic>> _packageSales = [];
+  List<Map<String, dynamic>> _packageUsage = [];
+  Map<String, dynamic> _packageDiscountSummary = {};
+  Map<String, List<Package>> _packageExpiry = {};
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadReports());
   }
 
@@ -73,6 +80,13 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
     _birthdays = await _reportDao.getBirthdaysInRange(mmdd1, mmdd2);
     _appointmentStats =
         await context.read<AppointmentProvider>().getAppointmentStats(_currentRange);
+    _packageSales = await _packageDao.getPackageSalesReport(
+        startDate: _startDate, endDate: _endDate);
+    _packageUsage = await _packageDao.getPackageUsageReport();
+    _packageDiscountSummary = await _packageDao.getPackageDiscountSummary(
+        startDate: _startDate, endDate: _endDate);
+    _packageExpiry = await _packageDao.getExpiryReport(
+        DateTime.now().toIso8601String().substring(0, 10));
 
     if (mounted) setState(() => _isLoading = false);
   }
@@ -96,6 +110,7 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
             Tab(text: 'Expenses'),
             Tab(text: 'Birthdays'),
             Tab(text: 'Appointments'),
+            Tab(text: 'Packages'),
           ],
         ),
       ),
@@ -146,6 +161,12 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
                     expenseByCategory: _expenseByCategory, summary: _summary),
                 _BirthdaysTab(birthdays: _birthdays),
                 _AppointmentsTab(stats: _appointmentStats),
+                _PackagesTab(
+                  sales: _packageSales,
+                  usage: _packageUsage,
+                  discountSummary: _packageDiscountSummary,
+                  expiry: _packageExpiry,
+                ),
               ],
             ),
           ),
@@ -1258,6 +1279,193 @@ class _AppointmentsTab extends StatelessWidget {
     );
   }
 }
+
+class _PackagesTab extends StatelessWidget {
+  final List<Map<String, dynamic>> sales;
+  final List<Map<String, dynamic>> usage;
+  final Map<String, dynamic> discountSummary;
+  final Map<String, List<Package>> expiry;
+
+  const _PackagesTab({
+    required this.sales,
+    required this.usage,
+    required this.discountSummary,
+    required this.expiry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final normalValue = (discountSummary['normal_value'] as num? ?? 0).toDouble();
+    final revenue = (discountSummary['revenue'] as num? ?? 0).toDouble();
+    final discount = (discountSummary['discount'] as num? ?? 0).toDouble();
+    final expiringSoon = expiry['expiringSoon'] ?? const <Package>[];
+    final expired = expiry['expired'] ?? const <Package>[];
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Package Discount Report
+        Row(
+          children: [
+            Expanded(child: StatCard(
+              title: 'Normal Value',
+              value: AppFormatters.formatCurrency(normalValue),
+              icon: Icons.receipt_long_rounded,
+              color: AppColors.textSecondary,
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: StatCard(
+              title: 'Package Revenue',
+              value: AppFormatters.formatCurrency(revenue),
+              icon: Icons.account_balance_wallet_rounded,
+              color: AppColors.primary,
+            )),
+          ],
+        ),
+        const SizedBox(height: 12),
+        StatCard(
+          title: 'Package Discount Given',
+          value: AppFormatters.formatCurrency(discount),
+          icon: Icons.percent_rounded,
+          color: AppColors.success,
+        ),
+        const SizedBox(height: 16),
+
+        // Package Sales
+        const Text('Package Sales',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        if (sales.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('No package sales in this range.',
+              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.divider),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: sales.map((row) {
+                final used = (row['times_used'] as num? ?? 0).toInt();
+                final normal = (row['normal_value'] as num? ?? 0).toDouble();
+                final rev = (row['revenue'] as num? ?? 0).toDouble();
+                final disc = (row['discount'] as num? ?? 0).toDouble();
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: Text(row['package_name'] as String? ?? 'Package',
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                          Text('×$used', style: const TextStyle(fontSize: 12, color: AppColors.textHint)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      _SummaryLine('Normal Value', AppFormatters.formatCurrency(normal)),
+                      _SummaryLine('Revenue', AppFormatters.formatCurrency(rev)),
+                      _SummaryLine('Discount', AppFormatters.formatCurrency(disc)),
+                      const Divider(height: 16),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        const SizedBox(height: 16),
+
+        // Package Expiry Report
+        const Text('Package Expiry',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        if (expiringSoon.isEmpty && expired.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('No packages expiring soon or expired.',
+              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+          )
+        else ...[
+          ...expiringSoon.map((p) => _PackageExpiryTile(package: p, label: 'Expiring Soon', color: AppColors.warning)),
+          ...expired.map((p) => _PackageExpiryTile(package: p, label: 'Expired', color: AppColors.error)),
+        ],
+        const SizedBox(height: 16),
+
+        // Package Usage Report
+        const Text('Package Usage',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        if (usage.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('No package usage yet.',
+              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: Column(
+              children: usage.map((row) {
+                final date = DateTime.tryParse(row['visit_date'] as String? ?? '');
+                return ListTile(
+                  dense: true,
+                  title: Text(row['customer_name'] as String? ?? '',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  subtitle: Text('${row['package_name']} · ${date != null ? AppFormatters.formatDate(date) : ''}',
+                    style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                  trailing: Text(
+                    AppFormatters.formatCurrency((row['amount'] as num? ?? 0).toDouble()),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.primary),
+                  ),
+                  onTap: () => context.push('/visit/${row['visit_id']}'),
+                );
+              }).toList(),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _PackageExpiryTile extends StatelessWidget {
+  final Package package;
+  final String label;
+  final Color color;
+  const _PackageExpiryTile({required this.package, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.card_giftcard_rounded, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(package.name,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+          Text('$label · ${package.expiryDate}',
+            style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _SummaryLine extends StatelessWidget {
   final String label;

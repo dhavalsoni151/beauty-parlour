@@ -4,6 +4,7 @@ import '../utils/formatters.dart';
 
 class DashboardProvider extends ChangeNotifier {
   final _reportDao = ReportDao();
+  final _packageDao = PackageDao();
 
   Map<String, dynamic> _normalizeTopService(Map<String, dynamic> row) {
     return {
@@ -21,6 +22,7 @@ class DashboardProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _salesTrend = [];
   List<Map<String, dynamic>> _topServices = [];
   List<Map<String, dynamic>> _paymentBreakdown = [];
+  Map<String, dynamic> _monthPackageStats = {};
   bool _isLoading = false;
 
   Map<String, dynamic> get todayStats => _todayStats;
@@ -28,6 +30,10 @@ class DashboardProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get salesTrend => _salesTrend;
   List<Map<String, dynamic>> get topServices => _topServices;
   List<Map<String, dynamic>> get paymentBreakdown => _paymentBreakdown;
+
+  /// Packages sold, package revenue/discount for the current month, plus
+  /// how many packages are currently active and expiring within 7 days.
+  Map<String, dynamic> get monthPackageStats => _monthPackageStats;
   bool get isLoading => _isLoading;
 
   Future<void> loadDashboard() async {
@@ -57,6 +63,10 @@ class DashboardProvider extends ChangeNotifier {
         .map(_normalizeTopService)
         .toList();
     _paymentBreakdown = await _reportDao.getPaymentMethodBreakdown(
+      month.start.toIso8601String(),
+      month.endExclusive.toIso8601String(),
+    );
+    _monthPackageStats = await _packageDao.getDashboardStats(
       month.start.toIso8601String(),
       month.endExclusive.toIso8601String(),
     );

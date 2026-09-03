@@ -21,6 +21,8 @@ class BackupService {
     'categories',
     'service_types',
     'services',
+    'packages',
+    'package_services',
     'visits',
     'appointments',
     'appointment_services',
@@ -91,6 +93,8 @@ class BackupService {
     report.expenses = _len(data['expenses']);
     report.appointments = _len(data['appointments']);
     report.appointmentServices = _len(data['appointment_services']);
+    report.packages = _len(data['packages']);
+    report.packageServices = _len(data['package_services']);
     final t = _sums(data);
     report.sourceVisitsTotal = report.migratedVisitsTotal = t.$1;
     report.sourcePaymentsTotal = report.migratedPaymentsTotal = t.$2;

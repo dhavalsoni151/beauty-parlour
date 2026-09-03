@@ -11,6 +11,7 @@ import 'core/providers/appointment_provider.dart';
 import 'core/providers/settings_provider.dart';
 import 'core/providers/app_lock_provider.dart';
 import 'core/providers/dashboard_provider.dart';
+import 'core/providers/package_provider.dart';
 import 'core/services/notification_service.dart';
 
 void main() async {
@@ -31,6 +32,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => AppointmentProvider()),
         ChangeNotifierProvider(create: (_) => ExpenseProvider()..loadExpenses()),
         ChangeNotifierProvider(create: (_) => DashboardProvider()),
+        ChangeNotifierProvider(create: (_) => PackageProvider()..loadPackages()),
       ],
       child: const BeautyParlourApp(),
     ),
