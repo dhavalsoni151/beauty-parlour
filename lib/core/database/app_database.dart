@@ -34,7 +34,7 @@ class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
 
-  static const int schemaVersion = 6;
+  static const int schemaVersion = 7;
   static const String _dbFileName = 'beauty_parlour.db';
 
   Database? _database;
@@ -68,9 +68,32 @@ class AppDatabase {
   // ── Fresh install ────────────────────────────────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
-    await _createTablesV6(db);
-    await _createIndexesV6(db);
+    await _createTablesV7(db);
+    await _createIndexesV7(db);
     await _seedDefaultData(db);
+  }
+
+  /// Customer Reminders module: `reminders` records each marketing/reminder
+  /// action taken for a customer (suggested → previewed → WhatsApp opened /
+  /// dismissed) so the same customer is not repeatedly contacted without
+  /// visibility. It is purely additive marketing metadata — it never touches
+  /// sales, visit, payment or package figures.
+  Future<void> _createTablesV7(DatabaseExecutor db) async {
+    await _createTablesV6(db);
+    await db.execute('''
+      CREATE TABLE reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        reminder_date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'SUGGESTED',
+        reason TEXT,
+        last_visit_id INTEGER,
+        days_since_visit INTEGER,
+        created_date TEXT,
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (last_visit_id) REFERENCES visits(id)
+      )
+    ''');
   }
 
   /// Packages module: a package bundles multiple services at a special
@@ -366,6 +389,21 @@ class AppDatabase {
   /// Every index required by the spec. Each statement is guarded so that on an
   /// upgrade with legacy data a single failing (e.g. duplicate) index does not
   /// abort the whole migration.
+  Future<void> _createIndexesV7(DatabaseExecutor db) async {
+    await _createIndexesV6(db);
+    final statements = <String>[
+      'CREATE INDEX IF NOT EXISTS idx_reminders_customer ON reminders(customer_id)',
+      'CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(reminder_date)',
+    ];
+    for (final stmt in statements) {
+      try {
+        await db.execute(stmt);
+      } catch (_) {
+        // Ignore.
+      }
+    }
+  }
+
   Future<void> _createIndexesV6(DatabaseExecutor db) async {
     await _createIndexesV4(db);
     final statements = <String>[
@@ -496,6 +534,32 @@ class AppDatabase {
     if (oldVersion < 6) {
       await _upgradeV5toV6(db);
     }
+    if (oldVersion < 7) {
+      await _upgradeV6toV7(db);
+    }
+  }
+
+  /// Adds the Customer Reminders module (`reminders` table). Purely additive —
+  /// no existing customer/visit/payment/package row is touched, so all
+  /// historical financial data and reports are unaffected.
+  Future<void> _upgradeV6toV7(Database db) async {
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS reminders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_id INTEGER NOT NULL,
+          reminder_date TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'SUGGESTED',
+          reason TEXT,
+          last_visit_id INTEGER,
+          days_since_visit INTEGER,
+          created_date TEXT,
+          FOREIGN KEY (customer_id) REFERENCES customers(id),
+          FOREIGN KEY (last_visit_id) REFERENCES visits(id)
+        )
+      ''');
+    } catch (_) {}
+    await _createIndexesV7(db);
   }
 
   /// Adds the Packages module: `packages`/`package_services` master tables

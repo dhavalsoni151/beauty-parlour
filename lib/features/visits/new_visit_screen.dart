@@ -695,21 +695,24 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     const sectionKey = '__favorites__';
     final isCollapsed = _collapsedSections.contains(sectionKey);
 
-    Widget serviceRow(Service svc) => _ServiceSelectRow(
-          service: svc,
-          billItem: _billItems.firstWhere((b) => b.service.id == svc.id,
-              orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
-          isSelected: _billItems.any((b) => b.service.id == svc.id),
-          onToggle: () => _toggleService(svc),
-          onPriceChanged: (v) {
-            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
-            if (idx >= 0) setState(() => _billItems[idx].price = v);
-          },
-          onQtyChanged: (v) {
-            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
-            if (idx >= 0) setState(() => _billItems[idx].quantity = v);
-          },
-        );
+    Widget serviceRow(Service svc) {
+      final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
+      final isPackageItem = idx >= 0 && _billItems[idx].isPackageItem;
+      return _ServiceSelectRow(
+        service: svc,
+        billItem: _billItems.firstWhere((b) => b.service.id == svc.id,
+            orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
+        isSelected: idx >= 0,
+        isPackageItem: isPackageItem,
+        onToggle: () => _toggleService(svc),
+        onPriceChanged: (v) {
+          if (idx >= 0) setState(() => _billItems[idx].price = v);
+        },
+        onQtyChanged: (v) {
+          if (idx >= 0) setState(() => _billItems[idx].quantity = v);
+        },
+      );
+    }
 
     return SliverToBoxAdapter(
       child: Padding(
@@ -810,21 +813,24 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
       return a.compareTo(b);
     });
 
-    Widget serviceRow(Service svc) => _ServiceSelectRow(
-          service: svc,
-          billItem: _billItems.firstWhere((b) => b.service.id == svc.id,
-              orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
-          isSelected: _billItems.any((b) => b.service.id == svc.id),
-          onToggle: () => _toggleService(svc),
-          onPriceChanged: (v) {
-            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
-            if (idx >= 0) setState(() => _billItems[idx].price = v);
-          },
-          onQtyChanged: (v) {
-            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
-            if (idx >= 0) setState(() => _billItems[idx].quantity = v);
-          },
-        );
+    Widget serviceRow(Service svc) {
+      final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
+      final isPackageItem = idx >= 0 && _billItems[idx].isPackageItem;
+      return _ServiceSelectRow(
+        service: svc,
+        billItem: _billItems.firstWhere((b) => b.service.id == svc.id,
+            orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
+        isSelected: idx >= 0,
+        isPackageItem: isPackageItem,
+        onToggle: () => _toggleService(svc),
+        onPriceChanged: (v) {
+          if (idx >= 0) setState(() => _billItems[idx].price = v);
+        },
+        onQtyChanged: (v) {
+          if (idx >= 0) setState(() => _billItems[idx].quantity = v);
+        },
+      );
+    }
 
     return SliverToBoxAdapter(
       child: Padding(
@@ -1726,6 +1732,11 @@ class _ServiceSelectRow extends StatefulWidget {
   final ValueChanged<double> onPriceChanged;
   final ValueChanged<int> onQtyChanged;
 
+  /// True when this row was auto-added as part of a package. Package-service
+  /// prices come from the package snapshot and cannot be edited here; only
+  /// non-package services have editable prices.
+  final bool isPackageItem;
+
   const _ServiceSelectRow({
     required this.service,
     required this.billItem,
@@ -1733,6 +1744,7 @@ class _ServiceSelectRow extends StatefulWidget {
     required this.onToggle,
     required this.onPriceChanged,
     required this.onQtyChanged,
+    this.isPackageItem = false,
   });
 
   @override
@@ -1806,8 +1818,12 @@ class _ServiceSelectRowState extends State<_ServiceSelectRow> {
                   color: widget.isSelected ? AppColors.textPrimary : AppColors.textSecondary,
                 )),
             ),
-            // Price field (editable when selected)
-            if (widget.isSelected) ...[
+            // Price: package items are fixed by the package snapshot (read-only);
+            // regular services get an editable price field when selected.
+            if (widget.isSelected && widget.isPackageItem)
+              Text(AppFormatters.formatCurrency(widget.billItem.price),
+                style: const TextStyle(fontSize: 13, color: AppColors.accent, fontWeight: FontWeight.w600))
+            else if (widget.isSelected) ...[
               SizedBox(
                 width: 80,
                 height: 32,

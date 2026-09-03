@@ -17,7 +17,11 @@ import '../packages/package_picker_sheet.dart';
 class AppointmentFormScreen extends StatefulWidget {
   final int? appointmentId;
 
-  const AppointmentFormScreen({super.key, this.appointmentId});
+  /// When set (e.g. from the Customer Reminders "Book Appointment" action),
+  /// the form opens with this customer already selected.
+  final int? preselectedCustomerId;
+
+  const AppointmentFormScreen({super.key, this.appointmentId, this.preselectedCustomerId});
 
   @override
   State<AppointmentFormScreen> createState() => _AppointmentFormScreenState();
@@ -82,6 +86,17 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
 
     _customers = List<Customer>.from(customerProvider.allCustomers);
     _categories = List<Category>.from(categoryProvider.categories);
+
+    // Preselect a customer when the form was opened for booking a reminder.
+    if (widget.appointmentId == null && widget.preselectedCustomerId != null) {
+      final pre = await customerProvider.getCustomer(widget.preselectedCustomerId!);
+      if (pre != null) {
+        if (!_customers.any((c) => c.id == pre.id)) {
+          _customers = [..._customers, pre];
+        }
+        _selectedCustomer = pre;
+      }
+    }
 
     if (widget.appointmentId != null) {
       final appointment =
@@ -637,9 +652,12 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                         const SizedBox(height: 12),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedCategory?.id,
-                          decoration: const InputDecoration(
-                            labelText: 'Category *',
-                            prefixIcon: Icon(Icons.category_rounded),
+                          decoration: InputDecoration(
+                            // A package supplies its own services, so the
+                            // category is only required when adding individual
+                            // services (no package selected).
+                            labelText: _selectedPackage == null ? 'Category *' : 'Category',
+                            prefixIcon: const Icon(Icons.category_rounded),
                           ),
                           items: _categories
                               .map((category) => DropdownMenuItem<int>(
@@ -659,7 +677,9 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                             });
                             await _loadCategoryData(value);
                           },
-                          validator: (value) => value == null ? 'Please choose a category' : null,
+                          validator: (value) => (value == null && _selectedPackage == null)
+                              ? 'Please choose a category'
+                              : null,
                         ),
                         const SizedBox(height: 12),
                         if (_selectedCategory != null)
@@ -746,9 +766,11 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                           ),
                         ] else ...[
                           const SizedBox(height: 8),
-                          const Text(
-                            'No services added yet. Choose a category and service above, then tap "Add Service". You can add multiple services, just like on a visit.',
-                            style: TextStyle(fontSize: 12, color: AppColors.textHint),
+                          Text(
+                            _selectedPackage == null
+                                ? 'No services added yet. Choose a category and service above, then tap "Add Service". You can add multiple services, just like on a visit.'
+                                : 'Add a package above, or choose a category and service to add individual services alongside it.',
+                            style: const TextStyle(fontSize: 12, color: AppColors.textHint),
                           ),
                         ],
                       ],

@@ -9,6 +9,7 @@ import '../../core/providers/appointment_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/providers/visit_provider.dart';
 import '../../core/database/daos/settings_dao.dart';
+import '../../core/database/daos/reminder_dao.dart';
 import '../../core/database/migration_mapping.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
@@ -175,6 +176,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           const SectionHeader(title: "Today's / Upcoming Appointments"),
           const SizedBox(height: 12),
           const _UpcomingAppointmentsSection(),
+          const SizedBox(height: 20),
+
+          // Customer reminders (uses the same query/rules as the Reminders screen)
+          const _CustomerRemindersCard(),
           const SizedBox(height: 20),
 
           // Sales trend chart
@@ -681,6 +686,95 @@ class _PaymentMethodChart extends StatelessWidget {
   }
 }
 
+
+/// Dashboard card for Customer Reminders. Uses the same ReminderDao query /
+/// business rules as the Reminders screen (no separate logic) to count due /
+/// eligible customers in a few "days since last visit" buckets.
+class _CustomerRemindersCard extends StatefulWidget {
+  const _CustomerRemindersCard();
+
+  @override
+  State<_CustomerRemindersCard> createState() => _CustomerRemindersCardState();
+}
+
+class _CustomerRemindersCardState extends State<_CustomerRemindersCard> {
+  Map<int, int> _counts = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final counts = await ReminderDao().getDueCounts(const [25, 60, 90]);
+    if (mounted) setState(() => _counts = counts);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c25 = _counts[25] ?? 0;
+    final c60 = _counts[60] ?? 0;
+    final c90 = _counts[90] ?? 0;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.notifications_active_rounded, color: AppColors.secondary),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Customer Reminders',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              TextButton(
+                onPressed: () => context.push('/reminders'),
+                child: const Text('View Reminders'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(child: _reminderBucket('Due / Eligible', '$c25', AppColors.secondary)),
+              const SizedBox(width: 8),
+              Expanded(child: _reminderBucket('Last 25+ Days', '$c25', AppColors.primary)),
+              const SizedBox(width: 8),
+              Expanded(child: _reminderBucket('Last 60+ Days', '$c60', AppColors.warning)),
+              const SizedBox(width: 8),
+              Expanded(child: _reminderBucket('Last 90+ Days', '$c90', AppColors.error)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reminderBucket(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(height: 2),
+          Text(label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
 
 class _UpcomingAppointmentsSection extends StatelessWidget {
   const _UpcomingAppointmentsSection();

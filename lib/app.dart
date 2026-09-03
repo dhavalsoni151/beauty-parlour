@@ -24,6 +24,7 @@ import 'features/appointments/appointments_screen.dart';
 import 'features/appointments/appointment_form_screen.dart';
 import 'features/packages/packages_screen.dart';
 import 'features/packages/package_form_screen.dart';
+import 'features/reminders/reminders_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/backup_restore_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
@@ -61,9 +62,19 @@ final GoRouter _router = GoRouter(
       },
     ),
     GoRoute(
+      path: '/reminders',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const RemindersScreen(),
+    ),
+    GoRoute(
       path: '/appointment/new',
       parentNavigatorKey: _rootNavigatorKey,
-      builder: (c, s) => const AppointmentFormScreen(),
+      builder: (c, s) {
+        final customerId = s.uri.queryParameters['customerId'];
+        return AppointmentFormScreen(
+          preselectedCustomerId: customerId != null ? int.tryParse(customerId) : null,
+        );
+      },
     ),
     GoRoute(
       path: '/appointment/:id/edit',
