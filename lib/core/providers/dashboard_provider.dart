@@ -5,6 +5,17 @@ import '../utils/formatters.dart';
 class DashboardProvider extends ChangeNotifier {
   final _reportDao = ReportDao();
 
+  Map<String, dynamic> _normalizeTopService(Map<String, dynamic> row) {
+    return {
+      ...row,
+      'transactions': (row['transactions'] as num? ?? 0).toInt(),
+      'visits': (row['visits'] as num? ?? 0).toInt(),
+      'quantity': (row['quantity'] as num? ?? 0).toInt(),
+      'revenue': (row['revenue'] as num? ?? 0).toDouble(),
+      'avg_price': (row['avg_price'] as num? ?? 0).toDouble(),
+    };
+  }
+
   Map<String, dynamic> _todayStats = {};
   Map<String, dynamic> _monthStats = {};
   List<Map<String, dynamic>> _salesTrend = [];
@@ -38,11 +49,13 @@ class DashboardProvider extends ChangeNotifier {
       month.start.toIso8601String(),
       month.endExclusive.toIso8601String(),
     );
-    _topServices = await _reportDao.getTopServices(
+    _topServices = (await _reportDao.getTopServices(
       month.start.toIso8601String(),
       month.endExclusive.toIso8601String(),
       limit: 5,
-    );
+    ))
+        .map(_normalizeTopService)
+        .toList();
     _paymentBreakdown = await _reportDao.getPaymentMethodBreakdown(
       month.start.toIso8601String(),
       month.endExclusive.toIso8601String(),

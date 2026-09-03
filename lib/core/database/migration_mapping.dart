@@ -155,6 +155,8 @@ class MigrationReport {
   int writeOffs = 0;
   int expenseCategories = 0;
   int expenses = 0;
+  int appointments = 0;
+  int appointmentServices = 0;
 
   /// Records that could not be cleanly mapped (each with a reason).
   final List<String> flagged = <String>[];
@@ -194,6 +196,8 @@ class MigrationReport {
     b.writeln('  Write-offs: $writeOffs');
     b.writeln('  Expense Categories: $expenseCategories');
     b.writeln('  Expenses: $expenses');
+    b.writeln('  Appointments: $appointments');
+    b.writeln('  Appointment Services: $appointmentServices');
     b.writeln('');
     b.writeln('Financial reconciliation (source -> migrated):');
     b.writeln('  Bills total: '

@@ -39,6 +39,7 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
   Category? _selectedCategory;
   int _selectedServiceTypeValue = _directServiceTypeValue;
   Service? _selectedService;
+  final List<_AppointmentServiceEntry> _selectedServices = [];
   DateTime _appointmentDate = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -103,34 +104,48 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
       await _loadCategoryData(_selectedCategory!.id!);
     }
 
-    if (_existingAppointment?.serviceId != null) {
-      final service = await _serviceDao.get(_existingAppointment!.serviceId!);
-      if (service != null) {
-        _selectedService = service;
-        _selectedCategory ??= _categories.firstWhere(
-          (c) => c.id == service.categoryId,
-          orElse: () => Category(
-            id: service.categoryId,
-            name: service.categoryName ?? 'Category',
-            createdDate: DateTime.now().toIso8601String(),
-          ),
-        );
-        _selectedServiceTypeValue = service.serviceTypeId ?? _directServiceTypeValue;
-        await _loadCategoryData(_selectedCategory!.id!);
-        if (service.serviceTypeId != null &&
-            !_serviceTypes.any((type) => type.id == service.serviceTypeId)) {
-          final currentType = await _serviceTypeDao.get(service.serviceTypeId!);
-          if (currentType != null) {
-            _serviceTypes = [..._serviceTypes, currentType];
-          }
-        }
-        if (!_services.any((s) => s.id == service.id)) {
-          _services = [..._services, service];
-        }
+    if (_existingAppointment != null) {
+      final services = _existingAppointment!.services.isNotEmpty
+          ? _existingAppointment!.services
+          : await _legacyServiceAsList(_existingAppointment!);
+      for (final s in services) {
+        _selectedServices.add(_AppointmentServiceEntry(
+          serviceId: s.serviceId,
+          categoryId: s.categoryId,
+          serviceTypeId: s.serviceTypeId,
+          categoryName: s.categoryNameSnapshot,
+          serviceTypeName: s.serviceTypeNameSnapshot,
+          serviceName: s.serviceNameSnapshot,
+          price: s.price,
+          quantity: s.quantity,
+        ));
       }
     }
 
     if (mounted) setState(() => _isLoading = false);
+  }
+
+  /// Converts a pre-multi-service appointment's legacy single-service columns
+  /// into the same shape as [AppointmentService] so old data still displays.
+  Future<List<AppointmentService>> _legacyServiceAsList(Appointment appointment) async {
+    if (appointment.serviceId == null && appointment.serviceNameSnapshot.isEmpty) {
+      return const [];
+    }
+    final service =
+        appointment.serviceId != null ? await _serviceDao.get(appointment.serviceId!) : null;
+    return [
+      AppointmentService(
+        appointmentId: appointment.id ?? 0,
+        serviceId: appointment.serviceId,
+        categoryId: appointment.categoryId,
+        serviceTypeId: appointment.serviceTypeId,
+        categoryNameSnapshot: service?.categoryName ?? '',
+        serviceTypeNameSnapshot: service?.serviceTypeName,
+        serviceNameSnapshot: appointment.serviceNameSnapshot,
+        price: service?.defaultPrice ?? 0.0,
+        total: service?.defaultPrice ?? 0.0,
+      ),
+    ];
   }
 
   Future<void> _loadCategoryData(int categoryId) async {
@@ -177,8 +192,8 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
       _showMessage('Please select a customer.');
       return;
     }
-    if (_selectedService == null) {
-      _showMessage('Please select a service.');
+    if (_selectedServices.isEmpty) {
+      _showMessage('Please add at least one service.');
       return;
     }
 
@@ -199,13 +214,14 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
         );
       }
 
+      final firstService = _selectedServices.first;
       final appointment = Appointment(
         id: _existingAppointment?.id,
         customerId: _selectedCustomer!.id!,
-        serviceId: _selectedService!.id,
-        categoryId: _selectedService!.categoryId,
-        serviceTypeId: _selectedService!.serviceTypeId,
-        serviceNameSnapshot: _selectedService!.name,
+        serviceId: firstService.serviceId,
+        categoryId: firstService.categoryId,
+        serviceTypeId: firstService.serviceTypeId,
+        serviceNameSnapshot: firstService.serviceName,
         appointmentDate: appointmentDate,
         startTime: startTime,
         endTime: _existingAppointment?.endTime,
@@ -222,11 +238,27 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
         customerPhone: _selectedCustomer!.phone,
       );
 
+      final serviceRows = _selectedServices
+          .map((s) => AppointmentService(
+                appointmentId: _existingAppointment?.id ?? 0,
+                serviceId: s.serviceId,
+                categoryId: s.categoryId,
+                serviceTypeId: s.serviceTypeId,
+                categoryNameSnapshot: s.categoryName,
+                serviceTypeNameSnapshot: s.serviceTypeName,
+                serviceNameSnapshot: s.serviceName,
+                price: s.price,
+                quantity: s.quantity,
+                total: s.total,
+                createdAt: DateTime.now().toIso8601String(),
+              ))
+          .toList();
+
       final provider = context.read<AppointmentProvider>();
       if (_existingAppointment == null) {
-        await provider.addAppointment(appointment);
+        await provider.addAppointment(appointment, services: serviceRows);
       } else {
-        await provider.updateAppointment(appointment);
+        await provider.updateAppointment(appointment, services: serviceRows);
       }
 
       if (mounted) context.pop(true);
@@ -235,6 +267,83 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  double get _selectedServicesTotal =>
+      _selectedServices.fold(0, (sum, item) => sum + item.total);
+
+  void _addSelectedService() {
+    final service = _selectedService;
+    if (service == null) return;
+    setState(() {
+      final existingIndex = _selectedServices.indexWhere((s) => s.serviceId == service.id);
+      if (existingIndex != -1) {
+        _selectedServices[existingIndex].quantity++;
+      } else {
+        _selectedServices.add(_AppointmentServiceEntry(
+          serviceId: service.id,
+          categoryId: service.categoryId,
+          serviceTypeId: service.serviceTypeId,
+          categoryName: service.categoryName ?? _selectedCategory?.name ?? '',
+          serviceTypeName: service.serviceTypeName,
+          serviceName: service.name,
+          price: service.defaultPrice,
+        ));
+      }
+    });
+  }
+
+  void _removeSelectedService(int index) {
+    setState(() => _selectedServices.removeAt(index));
+  }
+
+  void _changeSelectedServiceQuantity(int index, int delta) {
+    setState(() {
+      final item = _selectedServices[index];
+      final next = item.quantity + delta;
+      if (next <= 0) {
+        _selectedServices.removeAt(index);
+      } else {
+        item.quantity = next;
+      }
+    });
+  }
+
+  Widget _buildSelectedServiceRow(int index) {
+    final item = _selectedServices[index];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.serviceName,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                Text(
+                  AppFormatters.formatCurrency(item.price),
+                  style: const TextStyle(fontSize: 12, color: AppColors.textHint),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
+            onPressed: () => _changeSelectedServiceQuantity(index, -1),
+          ),
+          Text('${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w600)),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+            onPressed: () => _changeSelectedServiceQuantity(index, 1),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.error),
+            onPressed: () => _removeSelectedService(index),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showMessage(String message) {
@@ -398,7 +507,7 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                           DropdownButtonFormField<int>(
                             initialValue: _selectedService?.id,
                             decoration: const InputDecoration(
-                              labelText: 'Service *',
+                              labelText: 'Service',
                               prefixIcon: Icon(Icons.spa_rounded),
                             ),
                             items: _services
@@ -416,7 +525,43 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                                     : _services.firstWhere((service) => service.id == value);
                               });
                             },
-                            validator: (value) => value == null ? 'Please choose a service' : null,
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: _selectedService == null ? null : _addSelectedService,
+                              icon: const Icon(Icons.add_rounded),
+                              label: const Text('Add Service'),
+                            ),
+                          ),
+                        ],
+                        if (_selectedServices.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          const Divider(height: 1),
+                          const SizedBox(height: 12),
+                          Column(
+                            children: [
+                              for (int i = 0; i < _selectedServices.length; i++)
+                                _buildSelectedServiceRow(i),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              'Total: ${AppFormatters.formatCurrency(_selectedServicesTotal)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'No services added yet. Choose a category and service above, then tap "Add Service". You can add multiple services, just like on a visit.',
+                            style: TextStyle(fontSize: 12, color: AppColors.textHint),
                           ),
                         ],
                       ],
@@ -584,4 +729,31 @@ class _PickerTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One service the user has added to the appointment being booked. Mirrors
+/// the `_BillItem` used on the New Visit screen so the same service becomes
+/// the same visit-service line item once the appointment is completed.
+class _AppointmentServiceEntry {
+  final int? serviceId;
+  final int? categoryId;
+  final int? serviceTypeId;
+  final String categoryName;
+  final String? serviceTypeName;
+  final String serviceName;
+  final double price;
+  int quantity;
+
+  _AppointmentServiceEntry({
+    this.serviceId,
+    this.categoryId,
+    this.serviceTypeId,
+    required this.categoryName,
+    this.serviceTypeName,
+    required this.serviceName,
+    required this.price,
+    this.quantity = 1,
+  });
+
+  double get total => price * quantity;
 }

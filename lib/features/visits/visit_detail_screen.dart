@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/visit_provider.dart';
@@ -46,6 +47,14 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
       appBar: AppBar(
         title: Text('Bill #${v.id}'),
         actions: [
+          IconButton(
+            onPressed: () async {
+              final updated = await context.push<bool>('/new-visit?editVisitId=${v.id}');
+              if (updated == true) _loadVisit();
+            },
+            icon: const Icon(Icons.edit_rounded, size: 20),
+            tooltip: 'Edit visit',
+          ),
           if (v.pendingAmount > 0)
             TextButton.icon(
               onPressed: () => _showPaymentDialog(v),

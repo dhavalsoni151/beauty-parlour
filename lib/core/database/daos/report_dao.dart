@@ -5,6 +5,20 @@ import '../app_database.dart';
 /// (falling back to the snapshot triple for legacy rows without an id) so two
 /// services that share a name under different categories/types stay distinct.
 class ReportDao {
+  Map<String, dynamic> _mapTopServiceRow(Map<String, Object?> row) {
+    return {
+      'service_id': row['service_id'] as int?,
+      'category': row['category'] as String?,
+      'service_type': row['service_type'] as String?,
+      'name': row['name'] as String? ?? '',
+      'transactions': (row['transactions'] as num? ?? 0).toInt(),
+      'visits': (row['visits'] as num? ?? 0).toInt(),
+      'quantity': (row['quantity'] as num? ?? 0).toInt(),
+      'revenue': (row['revenue'] as num? ?? 0).toDouble(),
+      'avg_price': (row['avg_price'] as num? ?? 0).toDouble(),
+    };
+  }
+
   // ── Financial summary / P&L ───────────────────────────────────────────────
 
   Future<Map<String, dynamic>> getDashboardStats(
@@ -214,14 +228,14 @@ class ReportDao {
       args.add(serviceTypeName);
     }
 
-    return db.rawQuery('''
+    final rows = await db.rawQuery('''
       SELECT
         MAX(vs.service_id) AS service_id,
         vs.category_name_snapshot AS category,
         vs.service_type_name_snapshot AS service_type,
         vs.service_name_snapshot AS name,
         COUNT(*) AS transactions,
-        COUNT(DISTINCT vs.visit_id) AS visits,
+        COALESCE(COUNT(DISTINCT vs.visit_id), 0) AS visits,
         COALESCE(SUM(vs.quantity), 0) AS quantity,
         COALESCE(SUM(vs.total), 0) AS revenue,
         CASE WHEN SUM(vs.quantity) > 0
@@ -233,6 +247,8 @@ class ReportDao {
       ORDER BY $order DESC
       LIMIT $limit
     ''', args);
+
+    return rows.map(_mapTopServiceRow).toList();
   }
 
   // ── Customer reports ──────────────────────────────────────────────────────

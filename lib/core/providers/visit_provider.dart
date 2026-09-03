@@ -50,6 +50,16 @@ class VisitProvider extends ChangeNotifier {
     return id;
   }
 
+  /// Edits an existing visit's services/discount/notes. Payments already
+  /// recorded are left untouched; `totalPaid`/`pendingAmount`/`paymentStatus`
+  /// on [visit] should already reflect the new final total vs. paid-so-far.
+  Future<void> updateVisit(Visit visit, List<VisitService> services) async {
+    await _visitDao.updateVisit(visit, services);
+    await loadVisits();
+    await loadPendingVisits();
+    notifyListeners();
+  }
+
   Future<void> recordPayment(
       int visitId, Payment payment, double newTotalPaid, double newPending) async {
     await _paymentDao.insert(payment);

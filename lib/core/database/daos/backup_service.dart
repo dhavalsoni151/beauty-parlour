@@ -23,6 +23,7 @@ class BackupService {
     'services',
     'visits',
     'appointments',
+    'appointment_services',
     'visit_services',
     'payments',
     'write_offs',
@@ -88,6 +89,8 @@ class BackupService {
     report.writeOffs = _len(data['write_offs']);
     report.expenseCategories = _len(data['expense_categories']);
     report.expenses = _len(data['expenses']);
+    report.appointments = _len(data['appointments']);
+    report.appointmentServices = _len(data['appointment_services']);
     final t = _sums(data);
     report.sourceVisitsTotal = report.migratedVisitsTotal = t.$1;
     report.sourcePaymentsTotal = report.migratedPaymentsTotal = t.$2;
@@ -236,6 +239,38 @@ class BackupService {
         await txn.insert('visit_services', map,
             conflictAlgorithm: ConflictAlgorithm.replace);
         report.visitItems++;
+      }
+
+      // Appointments: 1:1, re-pointing category/service-type ids the same
+      // way as visit_services so upcoming appointments still resolve.
+      for (final a in _rows(data['appointments'])) {
+        final map = _map(a);
+        map.remove('customer_name');
+        map.remove('customer_phone');
+        map.remove('category_name');
+        map.remove('service_type_name');
+        final serviceId = (a['service_id'] as num?)?.toInt();
+        final target = serviceId != null ? targetByServiceId[serviceId] : null;
+        map['category_id'] = map['category_id'] ?? target?.categoryId;
+        map['service_type_id'] = map['service_type_id'] ?? target?.serviceTypeId;
+        await txn.insert('appointments', map,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        report.appointments++;
+      }
+
+      // Appointment services (multi-service appointments): same re-pointing.
+      for (final aps in _rows(data['appointment_services'])) {
+        final map = _map(aps);
+        map.remove('customer_name');
+        map.remove('customer_phone');
+        final serviceId = (aps['service_id'] as num?)?.toInt();
+        final target = serviceId != null ? targetByServiceId[serviceId] : null;
+        map['category_id'] = map['category_id'] ?? target?.categoryId;
+        map['service_type_id'] = map['service_type_id'] ?? target?.serviceTypeId;
+        map['category_name_snapshot'] = map['category_name_snapshot'] ?? '';
+        await txn.insert('appointment_services', map,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        report.appointmentServices++;
       }
 
       // Payments: 1:1 (never collapsed).

@@ -34,7 +34,7 @@ class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
 
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
   static const String _dbFileName = 'beauty_parlour.db';
 
   Database? _database;
@@ -68,9 +68,33 @@ class AppDatabase {
   // ── Fresh install ────────────────────────────────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
-    await _createTablesV3(db);
-    await _createIndexesV3(db);
+    await _createTablesV4(db);
+    await _createIndexesV4(db);
     await _seedDefaultData(db);
+  }
+
+  Future<void> _createTablesV4(DatabaseExecutor db) async {
+    await _createTablesV3(db);
+    await db.execute('''
+      CREATE TABLE appointment_services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        appointment_id INTEGER NOT NULL,
+        service_id INTEGER,
+        category_id INTEGER,
+        service_type_id INTEGER,
+        category_name_snapshot TEXT NOT NULL DEFAULT '',
+        service_type_name_snapshot TEXT,
+        service_name_snapshot TEXT NOT NULL,
+        price REAL NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        total REAL NOT NULL,
+        created_at TEXT,
+        FOREIGN KEY (appointment_id) REFERENCES appointments(id),
+        FOREIGN KEY (service_id) REFERENCES services(id),
+        FOREIGN KEY (category_id) REFERENCES categories(id),
+        FOREIGN KEY (service_type_id) REFERENCES service_types(id)
+      )
+    ''');
   }
 
   Future<void> _createTablesV3(DatabaseExecutor db) async {
@@ -259,6 +283,21 @@ class AppDatabase {
   /// Every index required by the spec. Each statement is guarded so that on an
   /// upgrade with legacy data a single failing (e.g. duplicate) index does not
   /// abort the whole migration.
+  Future<void> _createIndexesV4(DatabaseExecutor db) async {
+    await _createIndexesV3(db);
+    final statements = <String>[
+      'CREATE INDEX IF NOT EXISTS idx_as_appointment ON appointment_services(appointment_id)',
+      'CREATE INDEX IF NOT EXISTS idx_as_service ON appointment_services(service_id)',
+    ];
+    for (final stmt in statements) {
+      try {
+        await db.execute(stmt);
+      } catch (_) {
+        // Ignore.
+      }
+    }
+  }
+
   Future<void> _createIndexesV3(DatabaseExecutor db) async {
     await _createIndexesV2(db);
     final statements = <String>[
@@ -343,6 +382,74 @@ class AppDatabase {
     }
     if (oldVersion < 3) {
       await _upgradeV2toV3(db);
+    }
+    if (oldVersion < 4) {
+      await _upgradeV3toV4(db);
+    }
+  }
+
+  /// Adds the `appointment_services` table (multi-service appointments) and
+  /// backfills one row per pre-existing appointment from its legacy single
+  /// `service_id`/`service_name_snapshot` columns, so upgraded installs keep
+  /// their appointment history intact.
+  Future<void> _upgradeV3toV4(Database db) async {
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS appointment_services (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          appointment_id INTEGER NOT NULL,
+          service_id INTEGER,
+          category_id INTEGER,
+          service_type_id INTEGER,
+          category_name_snapshot TEXT NOT NULL DEFAULT '',
+          service_type_name_snapshot TEXT,
+          service_name_snapshot TEXT NOT NULL,
+          price REAL NOT NULL,
+          quantity INTEGER NOT NULL DEFAULT 1,
+          total REAL NOT NULL,
+          created_at TEXT,
+          FOREIGN KEY (appointment_id) REFERENCES appointments(id),
+          FOREIGN KEY (service_id) REFERENCES services(id),
+          FOREIGN KEY (category_id) REFERENCES categories(id),
+          FOREIGN KEY (service_type_id) REFERENCES service_types(id)
+        )
+      ''');
+    } catch (_) {}
+    await _createIndexesV4(db);
+
+    try {
+      final legacy = await db.rawQuery('''
+        SELECT a.id AS appointment_id, a.service_id, a.category_id, a.service_type_id,
+               a.service_name_snapshot, s.default_price AS price,
+               c.name AS category_name, st.name AS service_type_name
+        FROM appointments a
+        LEFT JOIN services s ON s.id = a.service_id
+        LEFT JOIN categories c ON c.id = a.category_id
+        LEFT JOIN service_types st ON st.id = a.service_type_id
+        WHERE a.service_name_snapshot IS NOT NULL AND a.service_name_snapshot != ''
+          AND NOT EXISTS (
+            SELECT 1 FROM appointment_services aps WHERE aps.appointment_id = a.id
+          )
+      ''');
+      final now = DateTime.now().toIso8601String();
+      for (final row in legacy) {
+        final price = (row['price'] as num?)?.toDouble() ?? 0.0;
+        await db.insert('appointment_services', {
+          'appointment_id': row['appointment_id'],
+          'service_id': row['service_id'],
+          'category_id': row['category_id'],
+          'service_type_id': row['service_type_id'],
+          'category_name_snapshot': row['category_name'] as String? ?? '',
+          'service_type_name_snapshot': row['service_type_name'] as String?,
+          'service_name_snapshot': row['service_name_snapshot'],
+          'price': price,
+          'quantity': 1,
+          'total': price,
+          'created_at': now,
+        });
+      }
+    } catch (_) {
+      // Best-effort backfill; legacy single-service columns remain readable.
     }
   }
 
@@ -613,14 +720,132 @@ class AppDatabase {
       {'name': 'Threading', 'display_order': 8},
       {'name': 'Other', 'display_order': 9},
     ];
+    final categoryIds = <String, int>{};
     for (final cat in serviceCategories) {
-      await db.insert('categories', {
+      final id = await db.insert('categories', {
         'name': cat['name'],
         'is_active': 1,
         'created_date': now,
         'display_order': cat['display_order'],
       });
+      categoryIds[cat['name'] as String] = id;
     }
+
+    await _seedDefaultServices(db, categoryIds, now);
+  }
+
+  /// Pre-fills the master service catalogue (subcategories + services with
+  /// their real-world prices) on a fresh install, so the price list is ready
+  /// to use out of the box instead of starting empty.
+  Future<void> _seedDefaultServices(
+    DatabaseExecutor db,
+    Map<String, int> categoryIds,
+    String now,
+  ) async {
+    Future<int> insertServiceType(
+      String categoryName,
+      String typeName,
+      int order,
+    ) {
+      return db.insert('service_types', {
+        'category_id': categoryIds[categoryName],
+        'name': typeName,
+        'is_active': 1,
+        'display_order': order,
+        'created_date': now,
+      });
+    }
+
+    Future<void> insertService(
+      String categoryName,
+      int? serviceTypeId,
+      String name,
+      double price,
+      int order,
+    ) {
+      return db.insert('services', {
+        'category_id': categoryIds[categoryName],
+        'service_type_id': serviceTypeId,
+        'name': name,
+        'default_price': price,
+        'is_active': 1,
+        'display_order': order,
+        'created_date': now,
+      });
+    }
+
+    // Wax → Regular Wax
+    final regularWaxId = await insertServiceType('Wax', 'Regular Wax', 1);
+    final regularWax = {
+      'Full Hand': 120.0,
+      'Full Legs': 250.0,
+      'Under Arms': 60.0,
+      'Half Legs': 120.0,
+      'Face Wax': 120.0,
+    };
+    var order = 1;
+    for (final entry in regularWax.entries) {
+      await insertService('Wax', regularWaxId, entry.key, entry.value, order++);
+    }
+
+    // Wax → Rica Wax
+    final ricaWaxId = await insertServiceType('Wax', 'Rica Wax', 2);
+    final ricaWax = {
+      'Bikini': 500.0,
+      'Full Hands': 250.0,
+      'Underarm': 100.0,
+      'Half Legs': 250.0,
+      'Face Wax': 200.0,
+    };
+    order = 1;
+    for (final entry in ricaWax.entries) {
+      await insertService('Wax', ricaWaxId, entry.key, entry.value, order++);
+    }
+
+    // Wax → Cream Wax
+    final creamWaxId = await insertServiceType('Wax', 'Cream Wax', 3);
+    final creamWax = {
+      'Full Hands': 170.0,
+      'Half Legs': 170.0,
+      'Full Legs': 350.0,
+      'Underarm': 70.0,
+      'Bikini': 400.0,
+      'Face Wax': 150.0,
+    };
+    order = 1;
+    for (final entry in creamWax.entries) {
+      await insertService('Wax', creamWaxId, entry.key, entry.value, order++);
+    }
+
+    // Hair → Colour
+    await insertService('Hair', null, 'Colour', 150.0, 1);
+
+    // Hair Spa → Hair Spa
+    await insertService('Hair Spa', null, 'Hair Spa', 500.0, 1);
+
+    // Threading → Eye Brow
+    await insertService('Threading', null, 'Eye Brow', 50.0, 1);
+
+    // Facial (no sub-types, direct services)
+    final facial = {
+      'Fruit': 500.0,
+      'Lotus': 800.0,
+      'O3 - 10 Steps': 1500.0,
+      'O3 - 7 Steps': 1200.0,
+    };
+    order = 1;
+    for (final entry in facial.entries) {
+      await insertService('Facial', null, entry.key, entry.value, order++);
+    }
+
+    // Manicure → Regular
+    await insertService('Manicure', null, 'Regular', 350.0, 1);
+
+    // Pedicure → Regular
+    await insertService('Pedicure', null, 'Regular', 450.0, 1);
+
+    // Makeup → Simple Makeup
+    await insertService('Makeup', null, 'Simple Makeup', 1000.0, 1);
   }
 }
 
