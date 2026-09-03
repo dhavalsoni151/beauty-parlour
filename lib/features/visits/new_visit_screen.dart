@@ -911,11 +911,12 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
 
   Future<void> _pickVisitDate() async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     final picked = await showDatePicker(
       context: context,
-      initialDate: _visitDate,
+      initialDate: _visitDate.isAfter(today) ? today : _visitDate,
       firstDate: DateTime(now.year - 10),
-      lastDate: DateTime(now.year + 1, now.month, now.day),
+      lastDate: today,
       helpText: 'Select Visit Date',
     );
     if (picked != null) setState(() => _visitDate = picked);
@@ -952,6 +953,17 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
   Future<void> _saveVisit() async {
     // Guard against duplicate visits from repeated taps or going back after save
     if (_isSaving || _savedVisitId != null) return;
+    if (!_isEditing) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final selectedDay = DateTime(_visitDate.year, _visitDate.month, _visitDate.day);
+      if (selectedDay.isAfter(today)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Visit date cannot be in the future')),
+        );
+        return;
+      }
+    }
     setState(() => _isSaving = true);
     try {
       final now = DateTime.now();
