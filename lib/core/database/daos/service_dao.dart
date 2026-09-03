@@ -32,7 +32,7 @@ class ServiceDao {
       JOIN categories c ON c.id = s.category_id
       LEFT JOIN service_types st ON st.id = s.service_type_id
       $where
-      ORDER BY c.display_order ASC, st.display_order ASC, s.display_order ASC, s.name ASC
+      ORDER BY s.is_favorite DESC, c.display_order ASC, st.display_order ASC, s.display_order ASC, s.name ASC
     ''', args);
     return rows.map((r) => Service.fromMap(r)).toList();
   }
@@ -92,6 +92,16 @@ class ServiceDao {
     }
     final db = await AppDatabase.instance.database;
     return db.insert('services', service.toMap());
+  }
+
+  Future<int> setFavorite(int id, bool isFavorite) async {
+    final db = await AppDatabase.instance.database;
+    return db.update(
+      'services',
+      {'is_favorite': isFavorite ? 1 : 0, 'updated_date': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<int> update(Service service) async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:io';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
@@ -44,6 +45,10 @@ class NewVisitScreen extends StatefulWidget {
 class _NewVisitScreenState extends State<NewVisitScreen> {
   // Step 0=customer, 1=services, 2=payment
   int _step = 0;
+
+  // Collapse/expand state for the services picker (favorites + per-category
+  // sections). Empty set = everything expanded by default.
+  final Set<String> _collapsedSections = {};
 
   Customer? _selectedCustomer;
   final List<_BillItem> _billItems = [];
@@ -451,6 +456,9 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                     )
                   : CustomScrollView(
                       slivers: [
+                        // Favorites first, so frequently-used services are
+                        // always one tap away regardless of category.
+                        _buildFavoritesSection(svcProvider),
                         // Category tabs with services
                         for (final cat in categories)
                           _buildCategorySection(cat, svcProvider),
@@ -478,64 +486,196 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     final priceCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
     int? selectedCategoryId = cats.first.id;
+    int? selectedTypeId;
+    List<ServiceType> types = selectedCategoryId != null
+        ? await catProvider.getServiceTypesForCategory(selectedCategoryId)
+        : [];
     final now = DateTime.now().toIso8601String();
 
+    if (!mounted) return;
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('New Service'),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<int>(
-                    initialValue: selectedCategoryId,
-                    decoration: const InputDecoration(labelText: 'Category *'),
-                    items: cats.map((c) => DropdownMenuItem<int>(value: c.id!, child: Text(c.name))).toList(),
-                    onChanged: (v) => setDialogState(() => selectedCategoryId = v),
-                    validator: (v) => v == null ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Service Name *'),
-                    validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
-                    autofocus: true,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: priceCtrl,
-                    decoration: const InputDecoration(labelText: 'Default Price (₹) *', prefixText: '₹ '),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (v) {
-                      if (v == null || v.isEmpty) return 'Required';
-                      if (double.tryParse(v) == null) return 'Invalid';
-                      return null;
-                    },
-                  ),
-                ],
+        builder: (ctx, setDialogState) {
+          // Load service types (sub-categories) for the currently selected
+          // category so the picker always reflects the latest category /
+          // sub-category structure managed from Settings.
+          Future<void> reloadTypes(int categoryId) async {
+            final loaded = await catProvider.getServiceTypesForCategory(categoryId);
+            setDialogState(() {
+              types = loaded;
+              if (selectedTypeId != null && !types.any((t) => t.id == selectedTypeId)) {
+                selectedTypeId = null;
+              }
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('New Service'),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      initialValue: selectedCategoryId,
+                      decoration: const InputDecoration(labelText: 'Category *'),
+                      items: cats.map((c) => DropdownMenuItem<int>(value: c.id!, child: Text(c.name))).toList(),
+                      onChanged: (v) {
+                        setDialogState(() {
+                          selectedCategoryId = v;
+                          selectedTypeId = null;
+                          types = [];
+                        });
+                        if (v != null) reloadTypes(v);
+                      },
+                      validator: (v) => v == null ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<int?>(
+                      initialValue: selectedTypeId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Service Type (Optional)'),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                            value: null, child: Text('None (directly under category)')),
+                        ...types.map((t) => DropdownMenuItem<int?>(value: t.id, child: Text(t.name))),
+                      ],
+                      onChanged: (v) => setDialogState(() => selectedTypeId = v),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Service Name *'),
+                      validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+                      autofocus: true,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: priceCtrl,
+                      decoration: const InputDecoration(labelText: 'Default Price (₹) *', prefixText: '₹ '),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Required';
+                        if (double.tryParse(v) == null) return 'Invalid';
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                final svc = Service(
-                  categoryId: selectedCategoryId!,
-                  name: nameCtrl.text.trim(),
-                  defaultPrice: double.parse(priceCtrl.text),
-                  createdDate: now,
-                );
-                await svcProvider.addService(svc);
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('Add'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () async {
+                  if (!formKey.currentState!.validate()) return;
+                  final svc = Service(
+                    categoryId: selectedCategoryId!,
+                    serviceTypeId: selectedTypeId,
+                    name: nameCtrl.text.trim(),
+                    defaultPrice: double.parse(priceCtrl.text),
+                    createdDate: now,
+                  );
+                  await svcProvider.addService(svc);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('Add'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  SliverToBoxAdapter _buildFavoritesSection(ServiceProvider svcProvider) {
+    final favorites = svcProvider.allServices
+        .where((s) => s.isActive && s.isFavorite)
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    if (favorites.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
+
+    const sectionKey = '__favorites__';
+    final isCollapsed = _collapsedSections.contains(sectionKey);
+
+    Widget serviceRow(Service svc) => _ServiceSelectRow(
+          service: svc,
+          billItem: _billItems.firstWhere((b) => b.service.id == svc.id,
+              orElse: () => _BillItem(service: svc, price: svc.defaultPrice)),
+          isSelected: _billItems.any((b) => b.service.id == svc.id),
+          onToggle: () => _toggleService(svc),
+          onPriceChanged: (v) {
+            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
+            if (idx >= 0) setState(() => _billItems[idx].price = v);
+          },
+          onQtyChanged: (v) {
+            final idx = _billItems.indexWhere((b) => b.service.id == svc.id);
+            if (idx >= 0) setState(() => _billItems[idx].quantity = v);
+          },
+        );
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeader(
+              label: 'Favorites',
+              icon: Icons.star_rounded,
+              color: AppColors.warning,
+              background: AppColors.warningLight,
+              isCollapsed: isCollapsed,
+              onTap: () => _toggleSectionCollapsed(sectionKey),
+            ),
+            if (!isCollapsed) ...[
+              const SizedBox(height: 8),
+              ...favorites.map(serviceRow),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toggleSectionCollapsed(String key) {
+    setState(() {
+      if (!_collapsedSections.add(key)) _collapsedSections.remove(key);
+    });
+  }
+
+  Widget _buildSectionHeader({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required Color background,
+    required bool isCollapsed,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+            const SizedBox(width: 6),
+            Icon(
+              isCollapsed ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+              size: 18,
+              color: color,
             ),
           ],
         ),
@@ -547,8 +687,12 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     final services = svcProvider.allServices.where((s) => s.categoryId == cat.id && s.isActive).toList();
     if (services.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
 
+    final sectionKey = 'cat_${cat.id}';
+    final isCollapsed = _collapsedSections.contains(sectionKey);
+
     // Group services by service type (null = directly under the category).
-    // Preserves the DAO ordering (display_order) within each group.
+    // Preserves the DAO ordering (display_order) within each group, with
+    // favorites bubbled to the top of their group.
     final Map<String?, List<Service>> byType = {};
     final List<String?> typeOrder = [];
     for (final s in services) {
@@ -558,6 +702,12 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         typeOrder.add(key);
       }
       byType[key]!.add(s);
+    }
+    for (final list in byType.values) {
+      list.sort((a, b) {
+        if (a.isFavorite != b.isFavorite) return a.isFavorite ? -1 : 1;
+        return 0;
+      });
     }
     // Show untyped services first, then each named service type.
     typeOrder.sort((a, b) {
@@ -588,34 +738,35 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.secondaryContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(cat.name,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.secondary)),
+            _buildSectionHeader(
+              label: cat.name,
+              icon: Icons.category_rounded,
+              color: AppColors.secondary,
+              background: AppColors.secondaryContainer,
+              isCollapsed: isCollapsed,
+              onTap: () => _toggleSectionCollapsed(sectionKey),
             ),
-            const SizedBox(height: 8),
-            for (final typeName in typeOrder) ...[
-              if (typeName != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.account_tree_rounded,
-                          size: 13, color: AppColors.textSecondary),
-                      const SizedBox(width: 4),
-                      Text(typeName,
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary)),
-                    ],
+            if (!isCollapsed) ...[
+              const SizedBox(height: 8),
+              for (final typeName in typeOrder) ...[
+                if (typeName != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.account_tree_rounded,
+                            size: 13, color: AppColors.textSecondary),
+                        const SizedBox(width: 4),
+                        Text(typeName,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textSecondary)),
+                      ],
+                    ),
                   ),
-                ),
-              ...byType[typeName]!.map(serviceRow),
+                ...byType[typeName]!.map(serviceRow),
+              ],
             ],
           ],
         ),
@@ -788,6 +939,10 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                 ),
                 const SizedBox(height: 20),
 
+                // Scanner (QR) option — shown when the customer wants to pay
+                // by scanning the parlour's UPI/payment QR code.
+                if (_paymentMethod == PaymentMethod.upi) _buildScannerCard(),
+
                 // Paid amount
                 const Align(alignment: Alignment.centerLeft,
                   child: Text('Amount Paid', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
@@ -919,6 +1074,51 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
       helpText: 'Select Visit Date',
     );
     if (picked != null) setState(() => _visitDate = picked);
+  }
+
+  /// Shows the parlour's uploaded UPI/payment scanner (QR) image, if any,
+  /// so the customer can scan it to complete a UPI payment.
+  Widget _buildScannerCard() {
+    return Consumer<SettingsProvider>(
+      builder: (context, settings, _) {
+        final path = settings.scannerImagePath;
+        final hasImage = path != null && File(path).existsSync();
+        if (!hasImage) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 20),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: Column(
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.qr_code_scanner_rounded, size: 18, color: AppColors.primary),
+                    SizedBox(width: 8),
+                    Text('Scan to Pay',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(File(path), height: 200, fit: BoxFit.contain),
+                ),
+                const SizedBox(height: 8),
+                const Text('Ask the customer to scan this code to complete the payment.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  textAlign: TextAlign.center),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildVisitDateSelector() {

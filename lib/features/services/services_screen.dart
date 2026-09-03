@@ -88,6 +88,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
                     onEdit: () => _showServiceDialog(context, services[i]),
                     onToggle: () =>
                         context.read<ServiceProvider>().toggleActive(services[i]),
+                    onToggleFavorite: () =>
+                        context.read<ServiceProvider>().toggleFavorite(services[i]),
                     onDelete: () => _deleteService(context, services[i]),
                   ),
                 );
@@ -336,10 +338,15 @@ class _ServiceCard extends StatelessWidget {
   final Service service;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
+  final VoidCallback onToggleFavorite;
   final VoidCallback onDelete;
 
   const _ServiceCard(
-      {required this.service, required this.onEdit, required this.onToggle, required this.onDelete});
+      {required this.service,
+      required this.onEdit,
+      required this.onToggle,
+      required this.onToggleFavorite,
+      required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -394,7 +401,15 @@ class _ServiceCard extends StatelessWidget {
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.primary)),
-          const SizedBox(width: 4),
+          IconButton(
+            icon: Icon(
+              service.isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+              color: service.isFavorite ? AppColors.warning : AppColors.textHint,
+              size: 22,
+            ),
+            tooltip: service.isFavorite ? 'Remove from favorites' : 'Mark as favorite',
+            onPressed: onToggleFavorite,
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded,
                 color: AppColors.textHint, size: 20),
@@ -403,6 +418,8 @@ class _ServiceCard extends StatelessWidget {
                 onEdit();
               } else if (v == 'toggle') {
                 onToggle();
+              } else if (v == 'favorite') {
+                onToggleFavorite();
               } else if (v == 'delete') {
                 onDelete();
               }
@@ -414,6 +431,17 @@ class _ServiceCard extends StatelessWidget {
                       leading: Icon(Icons.edit_rounded),
                       title: Text('Edit'),
                       dense: true)),
+              PopupMenuItem(
+                  value: 'favorite',
+                  child: ListTile(
+                    leading: Icon(service.isFavorite
+                        ? Icons.star_border_rounded
+                        : Icons.star_rounded),
+                    title: Text(service.isFavorite
+                        ? 'Remove from Favorites'
+                        : 'Mark as Favorite'),
+                    dense: true,
+                  )),
               PopupMenuItem(
                   value: 'toggle',
                   child: ListTile(
