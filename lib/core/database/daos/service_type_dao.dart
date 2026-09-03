@@ -1,6 +1,7 @@
 import '../app_database.dart';
 import '../../models/customer_models.dart';
 import 'db_exceptions.dart';
+import 'package:sqflite/sqflite.dart';
 
 class ServiceTypeDao {
   /// Service types for a category with active service counts.
@@ -74,5 +75,24 @@ class ServiceTypeDao {
       where: 'id = ?',
       whereArgs: [type.id],
     );
+  }
+
+  /// Deletes a service type, but only if no services (directly or
+  /// historically via visit_services) reference it.
+  Future<void> delete(int id) async {
+    final db = await AppDatabase.instance.database;
+    final serviceCount = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM services WHERE service_type_id = ?', [id])) ??
+        0;
+    final visitServiceCount = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM visit_services WHERE service_type_id = ?', [id])) ??
+        0;
+    if (serviceCount > 0 || visitServiceCount > 0) {
+      throw const InUseException(
+          'This service type cannot be deleted because it still has services '
+          'or past visits linked to it. Deactivate it instead, or remove/reassign '
+          'its services first.');
+    }
+    await db.delete('service_types', where: 'id = ?', whereArgs: [id]);
   }
 }

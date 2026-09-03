@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import '../database/database.dart';
 
@@ -13,6 +15,34 @@ class SettingsProvider extends ChangeNotifier {
   String get address => _settings['address'] ?? '';
   String get currency => _settings['currency'] ?? '₹';
   String get defaultPaymentMethod => _settings['default_payment_method'] ?? 'CASH';
+
+  // ── App PIN lock ─────────────────────────────────────────────────────────
+
+  bool get isPinEnabled => _settings['pin_enabled'] == 'true' && hasPin;
+  bool get hasPin => (_settings['pin_hash'] ?? '').isNotEmpty;
+
+  String _hashPin(String pin) => sha256.convert(utf8.encode(pin)).toString();
+
+  /// Sets (or changes) the app-unlock PIN and enables the lock.
+  Future<void> setPin(String pin) async {
+    final hash = _hashPin(pin);
+    await _settingsDao.setSetting('pin_hash', hash);
+    await _settingsDao.setSetting('pin_enabled', 'true');
+    _settings['pin_hash'] = hash;
+    _settings['pin_enabled'] = 'true';
+    notifyListeners();
+  }
+
+  /// Disables the PIN lock (forgets the stored PIN entirely).
+  Future<void> disablePin() async {
+    await _settingsDao.setSetting('pin_enabled', 'false');
+    await _settingsDao.deleteSetting('pin_hash');
+    _settings['pin_enabled'] = 'false';
+    _settings.remove('pin_hash');
+    notifyListeners();
+  }
+
+  bool verifyPin(String pin) => hasPin && _hashPin(pin) == _settings['pin_hash'];
 
   Future<void> loadSettings() async {
     _settings = await _settingsDao.getSettings();

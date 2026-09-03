@@ -88,6 +88,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                     onEdit: () => _showServiceDialog(context, services[i]),
                     onToggle: () =>
                         context.read<ServiceProvider>().toggleActive(services[i]),
+                    onDelete: () => _deleteService(context, services[i]),
                   ),
                 );
               },
@@ -296,15 +297,49 @@ class _ServicesScreenState extends State<ServicesScreen> {
       ),
     );
   }
+
+  Future<void> _deleteService(BuildContext context, Service service) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Service?'),
+        content: Text(
+            'Are you sure you want to delete "${service.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await context.read<ServiceProvider>().deleteService(service);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('"${service.name}" deleted')));
+      }
+    } on InUseException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
 }
 
 class _ServiceCard extends StatelessWidget {
   final Service service;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
+  final VoidCallback onDelete;
 
   const _ServiceCard(
-      {required this.service, required this.onEdit, required this.onToggle});
+      {required this.service, required this.onEdit, required this.onToggle, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -368,6 +403,8 @@ class _ServiceCard extends StatelessWidget {
                 onEdit();
               } else if (v == 'toggle') {
                 onToggle();
+              } else if (v == 'delete') {
+                onDelete();
               }
             },
             itemBuilder: (_) => [
@@ -386,6 +423,12 @@ class _ServiceCard extends StatelessWidget {
                     title: Text(service.isActive ? 'Deactivate' : 'Activate'),
                     dense: true,
                   )),
+              const PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                      leading: Icon(Icons.delete_rounded, color: AppColors.error),
+                      title: Text('Delete', style: TextStyle(color: AppColors.error)),
+                      dense: true)),
             ],
           ),
         ],

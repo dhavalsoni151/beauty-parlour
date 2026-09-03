@@ -8,6 +8,7 @@ export 'daos/customer_dao.dart';
 export 'daos/category_dao.dart';
 export 'daos/service_type_dao.dart';
 export 'daos/service_dao.dart';
+export 'daos/appointment_dao.dart';
 export 'daos/visit_dao.dart';
 export 'daos/payment_dao.dart';
 export 'daos/write_off_dao.dart';

@@ -40,6 +40,13 @@ class CategoryProvider extends ChangeNotifier {
     await loadCategories();
   }
 
+  /// Deletes a category. Throws [InUseException] (via the DAO) if the
+  /// category still has service types/services/visit history attached.
+  Future<void> deleteCategory(Category category) async {
+    await _categoryDao.delete(category.id!);
+    await loadCategories();
+  }
+
   Future<void> updateDisplayOrder(int id, int displayOrder) async {
     await _categoryDao.updateDisplayOrder(id, displayOrder);
     await loadCategories();
@@ -78,6 +85,11 @@ class CategoryProvider extends ChangeNotifier {
 
   Future<void> toggleServiceTypeActive(ServiceType type) async {
     await _serviceTypeDao.update(type.copyWith(isActive: !type.isActive));
+    await loadServiceTypes(type.categoryId);
+  }
+
+  Future<void> deleteServiceType(ServiceType type) async {
+    await _serviceTypeDao.delete(type.id!);
     await loadServiceTypes(type.categoryId);
   }
 
@@ -161,6 +173,11 @@ class ServiceProvider extends ChangeNotifier {
 
   Future<void> toggleActive(Service service) async {
     await _serviceDao.update(service.copyWith(isActive: !service.isActive));
+    await loadServices();
+  }
+
+  Future<void> deleteService(Service service) async {
+    await _serviceDao.delete(service.id!);
     await loadServices();
   }
 

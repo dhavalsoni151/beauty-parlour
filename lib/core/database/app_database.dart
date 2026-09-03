@@ -34,7 +34,7 @@ class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
 
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
   static const String _dbFileName = 'beauty_parlour.db';
 
   Database? _database;
@@ -68,9 +68,37 @@ class AppDatabase {
   // ── Fresh install ────────────────────────────────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
-    await _createTablesV2(db);
-    await _createIndexesV2(db);
+    await _createTablesV3(db);
+    await _createIndexesV3(db);
     await _seedDefaultData(db);
+  }
+
+  Future<void> _createTablesV3(DatabaseExecutor db) async {
+    await _createTablesV2(db);
+    await db.execute('''
+      CREATE TABLE appointments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        service_id INTEGER,
+        category_id INTEGER,
+        service_type_id INTEGER,
+        service_name_snapshot TEXT,
+        appointment_date TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        notes TEXT,
+        visit_id INTEGER,
+        reminder_minutes_before INTEGER,
+        created_date TEXT NOT NULL,
+        updated_date TEXT,
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (service_id) REFERENCES services(id),
+        FOREIGN KEY (category_id) REFERENCES categories(id),
+        FOREIGN KEY (service_type_id) REFERENCES service_types(id),
+        FOREIGN KEY (visit_id) REFERENCES visits(id)
+      )
+    ''');
   }
 
   Future<void> _createTablesV2(DatabaseExecutor db) async {
@@ -231,6 +259,24 @@ class AppDatabase {
   /// Every index required by the spec. Each statement is guarded so that on an
   /// upgrade with legacy data a single failing (e.g. duplicate) index does not
   /// abort the whole migration.
+  Future<void> _createIndexesV3(DatabaseExecutor db) async {
+    await _createIndexesV2(db);
+    final statements = <String>[
+      'CREATE INDEX IF NOT EXISTS idx_appointments_customer ON appointments(customer_id)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(appointment_date)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments(appointment_date, start_time)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_visit ON appointments(visit_id)',
+    ];
+    for (final stmt in statements) {
+      try {
+        await db.execute(stmt);
+      } catch (_) {
+        // Ignore.
+      }
+    }
+  }
+
   Future<void> _createIndexesV2(DatabaseExecutor db) async {
     final statements = <String>[
       // Unique constraints
@@ -295,6 +341,39 @@ class AppDatabase {
     if (oldVersion < 2) {
       await _upgradeV1toV2(db);
     }
+    if (oldVersion < 3) {
+      await _upgradeV2toV3(db);
+    }
+  }
+
+  Future<void> _upgradeV2toV3(Database db) async {
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS appointments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_id INTEGER NOT NULL,
+          service_id INTEGER,
+          category_id INTEGER,
+          service_type_id INTEGER,
+          service_name_snapshot TEXT,
+          appointment_date TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT,
+          status TEXT NOT NULL DEFAULT 'PENDING',
+          notes TEXT,
+          visit_id INTEGER,
+          reminder_minutes_before INTEGER,
+          created_date TEXT NOT NULL,
+          updated_date TEXT,
+          FOREIGN KEY (customer_id) REFERENCES customers(id),
+          FOREIGN KEY (service_id) REFERENCES services(id),
+          FOREIGN KEY (category_id) REFERENCES categories(id),
+          FOREIGN KEY (service_type_id) REFERENCES service_types(id),
+          FOREIGN KEY (visit_id) REFERENCES visits(id)
+        )
+      ''');
+    } catch (_) {}
+    await _createIndexesV3(db);
   }
 
   Future<void> _upgradeV1toV2(Database db) async {

@@ -1,6 +1,7 @@
 import '../app_database.dart';
 import '../../models/customer_models.dart';
 import 'db_exceptions.dart';
+import 'package:sqflite/sqflite.dart';
 
 class ServiceDao {
   Future<List<Service>> getServices({
@@ -106,5 +107,19 @@ class ServiceDao {
       where: 'id = ?',
       whereArgs: [service.id],
     );
+  }
+
+  /// Deletes a service, but only if it was never used in a past visit.
+  Future<void> delete(int id) async {
+    final db = await AppDatabase.instance.database;
+    final visitServiceCount = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM visit_services WHERE service_id = ?', [id])) ??
+        0;
+    if (visitServiceCount > 0) {
+      throw const InUseException(
+          'This service cannot be deleted because it has past visits linked '
+          'to it. Deactivate it instead.');
+    }
+    await db.delete('services', where: 'id = ?', whereArgs: [id]);
   }
 }

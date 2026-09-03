@@ -74,6 +74,7 @@ class _ServiceTypesScreenState extends State<ServiceTypesScreen> {
                           .toggleServiceTypeActive(_types[i]);
                       _load();
                     },
+                    onDelete: () => _deleteType(_types[i]),
                   ),
                 ),
       floatingActionButton: FloatingActionButton.extended(
@@ -167,15 +168,50 @@ class _ServiceTypesScreenState extends State<ServiceTypesScreen> {
       ),
     );
   }
+
+  Future<void> _deleteType(ServiceType type) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Service Type?'),
+        content: Text(
+            'Are you sure you want to delete "${type.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await context.read<CategoryProvider>().deleteServiceType(type);
+      _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('"${type.name}" deleted')));
+      }
+    } on InUseException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
 }
 
 class _TypeCard extends StatefulWidget {
   final ServiceType type;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
+  final VoidCallback onDelete;
 
   const _TypeCard(
-      {required this.type, required this.onEdit, required this.onToggle});
+      {required this.type, required this.onEdit, required this.onToggle, required this.onDelete});
 
   @override
   State<_TypeCard> createState() => _TypeCardState();
@@ -234,6 +270,8 @@ class _TypeCardState extends State<_TypeCard> {
                   widget.onEdit();
                 } else if (v == 'toggle') {
                   widget.onToggle();
+                } else if (v == 'delete') {
+                  widget.onDelete();
                 }
               },
               itemBuilder: (_) => [
@@ -252,6 +290,12 @@ class _TypeCardState extends State<_TypeCard> {
                       title: Text(t.isActive ? 'Deactivate' : 'Activate'),
                       dense: true,
                     )),
+                const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                        leading: Icon(Icons.delete_rounded, color: AppColors.error),
+                        title: Text('Delete', style: TextStyle(color: AppColors.error)),
+                        dense: true)),
               ],
             ),
             onTap: () {
