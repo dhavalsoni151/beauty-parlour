@@ -176,6 +176,11 @@ class ServiceProvider extends ChangeNotifier {
     await loadServices();
   }
 
+  Future<void> toggleFavorite(Service service) async {
+    await _serviceDao.setFavorite(service.id!, !service.isFavorite);
+    await loadServices();
+  }
+
   Future<void> deleteService(Service service) async {
     await _serviceDao.delete(service.id!);
     await loadServices();

@@ -34,7 +34,7 @@ class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
 
-  static const int schemaVersion = 4;
+  static const int schemaVersion = 5;
   static const String _dbFileName = 'beauty_parlour.db';
 
   Database? _database;
@@ -68,9 +68,16 @@ class AppDatabase {
   // ── Fresh install ────────────────────────────────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
-    await _createTablesV4(db);
+    await _createTablesV5(db);
     await _createIndexesV4(db);
     await _seedDefaultData(db);
+  }
+
+  Future<void> _createTablesV5(DatabaseExecutor db) async {
+    await _createTablesV4(db);
+    await db.execute('''
+      ALTER TABLE services ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0
+    ''');
   }
 
   Future<void> _createTablesV4(DatabaseExecutor db) async {
@@ -385,6 +392,21 @@ class AppDatabase {
     }
     if (oldVersion < 4) {
       await _upgradeV3toV4(db);
+    }
+    if (oldVersion < 5) {
+      await _upgradeV4toV5(db);
+    }
+  }
+
+  /// Adds the `is_favorite` flag to `services` so frequently-used services can
+  /// be pinned to the top of the picker in New Visit / Services screens.
+  Future<void> _upgradeV4toV5(Database db) async {
+    try {
+      await db.execute('''
+        ALTER TABLE services ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0
+      ''');
+    } catch (_) {
+      // Column may already exist (e.g. re-run after a partial upgrade).
     }
   }
 

@@ -233,6 +233,7 @@ class Service {
   final String createdDate;
   final String? updatedDate;
   final int displayOrder;
+  final bool isFavorite;
 
   // Joined fields.
   String? categoryName;
@@ -249,6 +250,7 @@ class Service {
     required this.createdDate,
     this.updatedDate,
     this.displayOrder = 0,
+    this.isFavorite = false,
     this.categoryName,
     this.serviceTypeName,
   });
@@ -265,6 +267,7 @@ class Service {
       createdDate: map['created_date'] as String,
       updatedDate: map['updated_date'] as String?,
       displayOrder: map['display_order'] as int? ?? 0,
+      isFavorite: (map['is_favorite'] as int? ?? 0) == 1,
       categoryName: map['category_name'] as String?,
       serviceTypeName: map['service_type_name'] as String?,
     );
@@ -282,6 +285,7 @@ class Service {
       'created_date': createdDate,
       'updated_date': updatedDate,
       'display_order': displayOrder,
+      'is_favorite': isFavorite ? 1 : 0,
     };
   }
 
@@ -297,6 +301,7 @@ class Service {
     String? createdDate,
     String? updatedDate,
     int? displayOrder,
+    bool? isFavorite,
     String? categoryName,
     String? serviceTypeName,
   }) {
@@ -311,6 +316,7 @@ class Service {
       createdDate: createdDate ?? this.createdDate,
       updatedDate: updatedDate ?? this.updatedDate,
       displayOrder: displayOrder ?? this.displayOrder,
+      isFavorite: isFavorite ?? this.isFavorite,
       categoryName: categoryName ?? this.categoryName,
       serviceTypeName: serviceTypeName ?? this.serviceTypeName,
     );

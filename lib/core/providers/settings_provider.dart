@@ -16,6 +16,27 @@ class SettingsProvider extends ChangeNotifier {
   String get currency => _settings['currency'] ?? '₹';
   String get defaultPaymentMethod => _settings['default_payment_method'] ?? 'CASH';
 
+  // ── Payment scanner (QR code) image ──────────────────────────────────────
+
+  /// Local file path of the uploaded payment scanner (UPI QR code) image, so
+  /// it can be shown to customers when they choose to pay by scanning it.
+  String? get scannerImagePath {
+    final path = _settings['scanner_image_path'];
+    return (path == null || path.isEmpty) ? null : path;
+  }
+
+  Future<void> setScannerImage(String path) async {
+    await _settingsDao.setSetting('scanner_image_path', path);
+    _settings['scanner_image_path'] = path;
+    notifyListeners();
+  }
+
+  Future<void> clearScannerImage() async {
+    await _settingsDao.deleteSetting('scanner_image_path');
+    _settings.remove('scanner_image_path');
+    notifyListeners();
+  }
+
   // ── App PIN lock ─────────────────────────────────────────────────────────
 
   bool get isPinEnabled => _settings['pin_enabled'] == 'true' && hasPin;
