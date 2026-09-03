@@ -117,53 +117,69 @@ Widget _buildAppBar(BuildContext context, SettingsProvider settings) {
     pinned: true,
     elevation: 0,
     backgroundColor: Colors.white,
-    flexibleSpace: FlexibleSpaceBar(
-      background: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppColors.primary,
-              AppColors.primaryDark,
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  settings.parlourName,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
+
+    flexibleSpace: LayoutBuilder(
+      builder: (context, constraints) {
+        final topPadding = MediaQuery.of(context).padding.top;
+        final currentHeight = constraints.biggest.height;
+
+        // App bar is considered collapsed when it reaches
+        // approximately toolbar height + status bar.
+        final isCollapsed = currentHeight <= kToolbarHeight + topPadding + 10;
+
+        return FlexibleSpaceBar(
+          background: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.primary,
+                  AppColors.primaryDark,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    // Show parlour name only when expanded
+                    if (!isCollapsed)
+                      Text(
+                        settings.parlourName,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
 
-      // When collapsed, show parlour name instead of "Dashboard"
-      title: Text(
-        settings.parlourName,
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
-      ),
+          // Show title ONLY when collapsed
+          title: isCollapsed
+              ? Text(
+                  settings.parlourName,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                )
+              : null,
 
-      titlePadding: const EdgeInsets.only(
-        left: 16,
-        bottom: 12,
-      ),
+          titlePadding: const EdgeInsets.only(
+            left: 16,
+            bottom: 12,
+          ),
+        );
+      },
     ),
   );
 }
