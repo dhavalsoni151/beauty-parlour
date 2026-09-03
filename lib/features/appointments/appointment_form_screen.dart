@@ -371,6 +371,7 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Autocomplete<Customer>(
+                          key: ValueKey(_selectedCustomer?.id),
                           initialValue: TextEditingValue(
                             text: _selectedCustomer == null
                                 ? ''
@@ -440,6 +441,15 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                               ),
                             );
                           },
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: _createNewCustomer,
+                            icon: const Icon(Icons.person_add_rounded, size: 18),
+                            label: const Text('Add Customer'),
+                          ),
                         ),
                       ],
                     ),
@@ -657,6 +667,66 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
   String _customerLabel(Customer customer) {
     if ((customer.phone ?? '').isEmpty) return customer.name;
     return '${customer.name} • ${customer.phone}';
+  }
+
+  Future<void> _createNewCustomer() async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final created = await showDialog<Customer>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New Customer'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Name *'),
+                autofocus: true,
+                validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: phoneCtrl,
+                decoration: const InputDecoration(labelText: 'Phone (Optional)'),
+                keyboardType: TextInputType.phone,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+              final now = DateTime.now().toIso8601String();
+              final customer = Customer(
+                name: nameCtrl.text.trim(),
+                phone: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
+                createdDate: now,
+              );
+              final id = await context.read<CustomerProvider>().addCustomer(customer);
+              final saved = customer.copyWith(id: id);
+              Navigator.pop(ctx, saved);
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+
+    if (created != null && mounted) {
+      setState(() {
+        if (!_customers.any((c) => c.id == created.id)) {
+          _customers = [..._customers, created];
+        }
+        _selectedCustomer = created;
+      });
+    }
   }
 
   TimeOfDay _parseTimeOfDay(String value) {

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/settings_provider.dart';
 import '../security/pin_pad.dart';
@@ -76,6 +79,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 24),
+
+            // Payment Scanner
+            _buildSectionTitle('Payment Scanner (QR Code)'),
+            const SizedBox(height: 10),
+            Consumer<SettingsProvider>(
+              builder: (context, settings, _) => _buildCard([
+                const Text(
+                  'Upload your UPI/payment scanner image. It will be shown to customers '
+                  'at the "Proceed to Payment" step so they can scan and pay.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                if (settings.scannerImagePath != null &&
+                    File(settings.scannerImagePath!).existsSync())
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      File(settings.scannerImagePath!),
+                      height: 180,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                if (settings.scannerImagePath != null &&
+                    File(settings.scannerImagePath!).existsSync())
+                  const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _uploadScannerImage(settings),
+                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                        label: Text(settings.scannerImagePath == null
+                            ? 'Upload Scanner Image'
+                            : 'Replace Image'),
+                      ),
+                    ),
+                    if (settings.scannerImagePath != null) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () => settings.clearScannerImage(),
+                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+                        tooltip: 'Remove',
+                      ),
+                    ],
+                  ],
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
 
             // Data Management
             _buildSectionTitle('Data Management'),
@@ -194,6 +246,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _uploadScannerImage(SettingsProvider settings) async {
+    try {
+      final result = await FilePicker.pickFile(type: FileType.image);
+      if (result == null || result.path == null) return;
+
+      final sourceFile = File(result.path!);
+      final dir = await getApplicationDocumentsDirectory();
+      final ext = result.name.contains('.') ? result.name.split('.').last : 'png';
+      final destPath = '${dir.path}/payment_scanner.$ext';
+
+      // Remove any previous scanner image (possibly with a different
+      // extension) before copying the new one in.
+      final previousPath = settings.scannerImagePath;
+      if (previousPath != null && previousPath != destPath) {
+        final previousFile = File(previousPath);
+        if (await previousFile.exists()) {
+          await previousFile.delete();
+        }
+      }
+
+      await sourceFile.copy(destPath);
+      await settings.setScannerImage(destPath);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Scanner image uploaded')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to upload image: $e')));
+      }
+    }
   }
 
   Future<void> _save() async {
