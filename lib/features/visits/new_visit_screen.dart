@@ -1420,10 +1420,10 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
           validated = validation.package!;
         }
         packageNormalTotal = validated!.services
-            .fold(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
+            .fold<double>(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
         packagePrice = _billItems
             .where((b) => b.packageId == validated!.id)
-            .fold(0.0, (sum, b) => sum + b.total);
+            .fold<double>(0.0, (sum, b) => sum + b.total);
         packageDiscount = packageNormalTotal - packagePrice;
         packageNameSnapshot = validated.name;
       }

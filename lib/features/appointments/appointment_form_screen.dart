@@ -257,10 +257,10 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
       String? packageNameSnapshot;
       if (_selectedPackage != null) {
         packageNormalTotal = _selectedPackage!.services
-            .fold(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
+            .fold<double>(0.0, (sum, ps) => sum + ps.normalPrice * ps.quantity);
         packagePrice = _selectedServices
             .where((e) => e.packageId == _selectedPackage!.id)
-            .fold(0.0, (sum, e) => sum + e.total);
+            .fold<double>(0.0, (sum, e) => sum + e.total);
         packageDiscount = packageNormalTotal - packagePrice;
         packageNameSnapshot = _selectedPackage!.name;
       }
