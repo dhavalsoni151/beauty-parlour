@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
@@ -1557,7 +1558,7 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
                 child: OutlinedButton.icon(
                   onPressed: _shareVisitSummary,
                   icon: const Icon(Icons.share_rounded),
-                  label: const Text('Share on WhatsApp'),
+                  label: const Text('Share Invoice on WhatsApp'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -1598,29 +1599,52 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
     );
   }
 
-  String _buildVisitShareMessage() {
+  String _buildVisitShareMessage(int visitId) {
     final customerName = _selectedCustomer?.name.trim();
     final parlourName = context.read<SettingsProvider>().parlourName.trim();
-    final opening = (customerName?.isNotEmpty ?? false)
-        ? 'Hi $customerName, thank you for visiting ${parlourName.isNotEmpty ? parlourName : 'us'}!'
-        : 'Thank you for visiting ${parlourName.isNotEmpty ? parlourName : 'us'}!';
+    final receiptDate = DateFormat('dd MMM yyyy').format(_visitDate);
 
-    final lines = _billItems.map((item) {
-      final quantitySuffix = item.quantity > 1 ? ' ×${item.quantity}' : '';
-      return '• ${item.service.name}$quantitySuffix — ${AppFormatters.formatCurrency(item.total)}';
-    });
+    const serviceWidth = 33;
+    const amountWidth = 12;
 
-    final buffer = StringBuffer()
-      ..writeln(opening)
-      ..writeln('Your visit summary:')
-      ..writeln(lines.join('\n'))
-      ..writeln('Total: ${AppFormatters.formatCurrency(_finalTotal)}');
-
-    if (_pendingAmount > 0) {
-      buffer.writeln('Pending: ${AppFormatters.formatCurrency(_pendingAmount)}');
+    String formatLine(String label, String amount) {
+      final trimmed = label.length > serviceWidth
+          ? '${label.substring(0, serviceWidth - 1)}…'
+          : label;
+      return '${trimmed.padRight(serviceWidth)}${amount.padLeft(amountWidth)}';
     }
 
-    buffer.write('See you again soon!');
+    final rows = _billItems.map((item) {
+      final quantitySuffix = item.quantity > 1 ? ' ×${item.quantity}' : '';
+      return formatLine(
+        '${item.service.pathLabel}$quantitySuffix',
+        AppFormatters.formatCurrency(item.total),
+      );
+    }).toList();
+
+    final buffer = StringBuffer()
+      ..writeln(parlourName.isNotEmpty ? parlourName.toUpperCase() : 'PRIYANKA BEAUTY PARLOUR')
+      ..writeln('INVOICE / RECEIPT')
+      ..writeln('Bill No: #$visitId')
+      ..writeln('Customer: ${customerName?.isNotEmpty == true ? customerName : 'Walk-in Customer'}')
+      ..writeln('Date: $receiptDate')
+      ..writeln()
+      ..writeln('${'Service'.padRight(serviceWidth)}${'Amount'.padLeft(amountWidth)}')
+      ..writeln('-' * (serviceWidth + amountWidth));
+
+    for (final row in rows) {
+      buffer.writeln(row);
+    }
+
+    buffer
+      ..writeln('-' * (serviceWidth + amountWidth))
+      ..writeln(formatLine('Total', AppFormatters.formatCurrency(_finalTotal)))
+      ..writeln(formatLine('Paid', AppFormatters.formatCurrency(_paidAmount)))
+      ..writeln(formatLine('Pending', AppFormatters.formatCurrency(_pendingAmount)))
+      ..writeln()
+      ..writeln('Payment: ${_paymentMethod.label}')
+      ..write('Thank you for your visit!');
+
     return buffer.toString();
   }
 
@@ -1629,13 +1653,13 @@ class _NewVisitScreenState extends State<NewVisitScreen> {
 
     try {
       await Share.share(
-        _buildVisitShareMessage(),
-        subject: 'Visit Summary',
+        _buildVisitShareMessage(visitId),
+        subject: 'Invoice #$visitId',
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to share visit summary: $e')),
+        SnackBar(content: Text('Unable to share invoice: $e')),
       );
     }
   }
