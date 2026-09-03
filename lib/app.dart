@@ -28,19 +28,21 @@ import 'features/reminders/reminders_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/backup_restore_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
+import 'features/splash/splash_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final GoRouter _router = GoRouter(
   navigatorKey: _rootNavigatorKey,
-  initialLocation: '/',
+  initialLocation: '/splash',
   routes: [
     ShellRoute(
       navigatorKey: _shellNavigatorKey,
       builder: (context, state, child) => MainScaffold(child: child),
       routes: [
         GoRoute(path: '/', builder: (c, s) => const DashboardScreen()),
+        GoRoute(path: '/splash', builder: (c, s) => const SplashScreen()),
         GoRoute(path: '/customers', builder: (c, s) => const CustomersListScreen()),
         GoRoute(path: '/reports', builder: (c, s) => const ReportsHomeScreen()),
         GoRoute(path: '/appointments', builder: (c, s) => const AppointmentsScreen()),
