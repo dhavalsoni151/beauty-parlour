@@ -58,6 +58,12 @@ class AppointmentService {
   final double total;
   final String? createdAt;
 
+  /// True if this line was added as part of a package. See [VisitService]
+  /// for the equivalent (and rationale) on the visit side.
+  final bool isPackageItem;
+  final int? packageId;
+  final double? normalPriceSnapshot;
+
   const AppointmentService({
     this.id,
     required this.appointmentId,
@@ -71,6 +77,9 @@ class AppointmentService {
     this.quantity = 1,
     required this.total,
     this.createdAt,
+    this.isPackageItem = false,
+    this.packageId,
+    this.normalPriceSnapshot,
   });
 
   factory AppointmentService.fromMap(Map<String, dynamic> map) {
@@ -87,6 +96,9 @@ class AppointmentService {
       quantity: map['quantity'] as int? ?? 1,
       total: (map['total'] as num? ?? 0).toDouble(),
       createdAt: map['created_at'] as String?,
+      isPackageItem: (map['is_package_item'] as int? ?? 0) == 1,
+      packageId: map['package_id'] as int?,
+      normalPriceSnapshot: (map['normal_price_snapshot'] as num?)?.toDouble(),
     );
   }
 
@@ -104,6 +116,9 @@ class AppointmentService {
       'quantity': quantity,
       'total': total,
       'created_at': createdAt,
+      'is_package_item': isPackageItem ? 1 : 0,
+      'package_id': packageId,
+      'normal_price_snapshot': normalPriceSnapshot,
     };
   }
 
@@ -130,6 +145,9 @@ class AppointmentService {
     int? quantity,
     double? total,
     String? createdAt,
+    bool? isPackageItem,
+    int? packageId,
+    double? normalPriceSnapshot,
   }) {
     return AppointmentService(
       id: id ?? this.id,
@@ -145,6 +163,9 @@ class AppointmentService {
       quantity: quantity ?? this.quantity,
       total: total ?? this.total,
       createdAt: createdAt ?? this.createdAt,
+      isPackageItem: isPackageItem ?? this.isPackageItem,
+      packageId: packageId ?? this.packageId,
+      normalPriceSnapshot: normalPriceSnapshot ?? this.normalPriceSnapshot,
     );
   }
 }
@@ -165,6 +186,14 @@ class Appointment {
   final int? reminderMinutesBefore;
   final String createdDate;
   final String? updatedDate;
+
+  /// Package snapshot (null when no package was used). Frozen once set —
+  /// later edits to the package master never change these.
+  final int? packageId;
+  final String? packageNameSnapshot;
+  final double? packageNormalTotal;
+  final double? packagePrice;
+  final double? packageDiscount;
 
   String? customerName;
   String? customerPhone;
@@ -190,10 +219,17 @@ class Appointment {
     this.reminderMinutesBefore,
     required this.createdDate,
     this.updatedDate,
+    this.packageId,
+    this.packageNameSnapshot,
+    this.packageNormalTotal,
+    this.packagePrice,
+    this.packageDiscount,
     this.customerName,
     this.customerPhone,
     List<AppointmentService>? services,
   }) : services = services ?? const [];
+
+  bool get hasPackage => packageId != null;
 
   factory Appointment.fromMap(Map<String, dynamic> map) {
     return Appointment(
@@ -213,6 +249,11 @@ class Appointment {
       reminderMinutesBefore: map['reminder_minutes_before'] as int?,
       createdDate: map['created_date'] as String,
       updatedDate: map['updated_date'] as String?,
+      packageId: map['package_id'] as int?,
+      packageNameSnapshot: map['package_name_snapshot'] as String?,
+      packageNormalTotal: (map['package_normal_total'] as num?)?.toDouble(),
+      packagePrice: (map['package_price'] as num?)?.toDouble(),
+      packageDiscount: (map['package_discount'] as num?)?.toDouble(),
       customerName: map['customer_name'] as String?,
       customerPhone: map['customer_phone'] as String?,
     );
@@ -235,6 +276,11 @@ class Appointment {
       'reminder_minutes_before': reminderMinutesBefore,
       'created_date': createdDate,
       'updated_date': updatedDate,
+      'package_id': packageId,
+      'package_name_snapshot': packageNameSnapshot,
+      'package_normal_total': packageNormalTotal,
+      'package_price': packagePrice,
+      'package_discount': packageDiscount,
     };
   }
 
@@ -254,6 +300,11 @@ class Appointment {
     int? reminderMinutesBefore,
     String? createdDate,
     String? updatedDate,
+    int? packageId,
+    String? packageNameSnapshot,
+    double? packageNormalTotal,
+    double? packagePrice,
+    double? packageDiscount,
     String? customerName,
     String? customerPhone,
     List<AppointmentService>? services,
@@ -275,6 +326,11 @@ class Appointment {
           reminderMinutesBefore ?? this.reminderMinutesBefore,
       createdDate: createdDate ?? this.createdDate,
       updatedDate: updatedDate ?? this.updatedDate,
+      packageId: packageId ?? this.packageId,
+      packageNameSnapshot: packageNameSnapshot ?? this.packageNameSnapshot,
+      packageNormalTotal: packageNormalTotal ?? this.packageNormalTotal,
+      packagePrice: packagePrice ?? this.packagePrice,
+      packageDiscount: packageDiscount ?? this.packageDiscount,
       customerName: customerName ?? this.customerName,
       customerPhone: customerPhone ?? this.customerPhone,
       services: services ?? this.services,

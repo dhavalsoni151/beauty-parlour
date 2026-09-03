@@ -34,7 +34,7 @@ class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
 
-  static const int schemaVersion = 5;
+  static const int schemaVersion = 6;
   static const String _dbFileName = 'beauty_parlour.db';
 
   Database? _database;
@@ -68,9 +68,85 @@ class AppDatabase {
   // ── Fresh install ────────────────────────────────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
-    await _createTablesV5(db);
-    await _createIndexesV4(db);
+    await _createTablesV6(db);
+    await _createIndexesV6(db);
     await _seedDefaultData(db);
+  }
+
+  /// Packages module: a package bundles multiple services at a special
+  /// selling price. `packages`/`package_services` are the *master* data used
+  /// only when composing/selecting a package — every visit/appointment that
+  /// actually uses one snapshots the relevant fields onto itself so later
+  /// edits to the package (or the underlying services) never change
+  /// historical transactions (see `visits`/`visit_services` snapshot columns
+  /// below and their appointment equivalents).
+  Future<void> _createTablesV6(DatabaseExecutor db) async {
+    await _createTablesV5(db);
+    await db.execute('''
+      CREATE TABLE packages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        package_price REAL NOT NULL,
+        start_date TEXT NOT NULL,
+        expiry_date TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_date TEXT NOT NULL,
+        updated_date TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE package_services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        package_id INTEGER NOT NULL,
+        service_id INTEGER,
+        category_id INTEGER,
+        service_type_id INTEGER,
+        category_name_snapshot TEXT NOT NULL DEFAULT '',
+        service_type_name_snapshot TEXT,
+        service_name_snapshot TEXT NOT NULL,
+        normal_price REAL NOT NULL,
+        package_service_amount REAL NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        created_date TEXT,
+        FOREIGN KEY (package_id) REFERENCES packages(id),
+        FOREIGN KEY (service_id) REFERENCES services(id),
+        FOREIGN KEY (category_id) REFERENCES categories(id),
+        FOREIGN KEY (service_type_id) REFERENCES service_types(id)
+      )
+    ''');
+    // Package snapshot columns on visits/visit_services and their
+    // appointment equivalents. `price`/`total` on visit_services already
+    // holds the amount actually charged (the package-service amount for
+    // package lines), so existing revenue aggregates keep working
+    // unmodified; `normal_price_snapshot` and `is_package_item`/`package_id`
+    // are additive and only consumed by package-aware reports.
+    for (final col in <String>[
+      'ALTER TABLE visits ADD COLUMN package_id INTEGER',
+      'ALTER TABLE visits ADD COLUMN package_name_snapshot TEXT',
+      'ALTER TABLE visits ADD COLUMN package_normal_total REAL',
+      'ALTER TABLE visits ADD COLUMN package_price REAL',
+      'ALTER TABLE visits ADD COLUMN package_discount REAL',
+      'ALTER TABLE visit_services ADD COLUMN is_package_item INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE visit_services ADD COLUMN package_id INTEGER',
+      'ALTER TABLE visit_services ADD COLUMN normal_price_snapshot REAL',
+      'ALTER TABLE appointments ADD COLUMN package_id INTEGER',
+      'ALTER TABLE appointments ADD COLUMN package_name_snapshot TEXT',
+      'ALTER TABLE appointments ADD COLUMN package_normal_total REAL',
+      'ALTER TABLE appointments ADD COLUMN package_price REAL',
+      'ALTER TABLE appointments ADD COLUMN package_discount REAL',
+      'ALTER TABLE appointment_services ADD COLUMN is_package_item INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE appointment_services ADD COLUMN package_id INTEGER',
+      'ALTER TABLE appointment_services ADD COLUMN normal_price_snapshot REAL',
+    ]) {
+      try {
+        await db.execute(col);
+      } catch (_) {
+        // Column may already exist (fresh-install path defines the table
+        // without these columns first, then adds them here in both the
+        // create and upgrade paths — see the try/catch note below).
+      }
+    }
   }
 
   Future<void> _createTablesV5(DatabaseExecutor db) async {
@@ -290,6 +366,27 @@ class AppDatabase {
   /// Every index required by the spec. Each statement is guarded so that on an
   /// upgrade with legacy data a single failing (e.g. duplicate) index does not
   /// abort the whole migration.
+  Future<void> _createIndexesV6(DatabaseExecutor db) async {
+    await _createIndexesV4(db);
+    final statements = <String>[
+      'CREATE INDEX IF NOT EXISTS idx_packages_active ON packages(is_active)',
+      'CREATE INDEX IF NOT EXISTS idx_packages_dates ON packages(start_date, expiry_date)',
+      'CREATE INDEX IF NOT EXISTS idx_package_services_package ON package_services(package_id)',
+      'CREATE INDEX IF NOT EXISTS idx_package_services_service ON package_services(service_id)',
+      'CREATE INDEX IF NOT EXISTS idx_visits_package ON visits(package_id)',
+      'CREATE INDEX IF NOT EXISTS idx_vs_package ON visit_services(package_id)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_package ON appointments(package_id)',
+      'CREATE INDEX IF NOT EXISTS idx_as_package ON appointment_services(package_id)',
+    ];
+    for (final stmt in statements) {
+      try {
+        await db.execute(stmt);
+      } catch (_) {
+        // Ignore.
+      }
+    }
+  }
+
   Future<void> _createIndexesV4(DatabaseExecutor db) async {
     await _createIndexesV3(db);
     final statements = <String>[
@@ -396,6 +493,79 @@ class AppDatabase {
     if (oldVersion < 5) {
       await _upgradeV4toV5(db);
     }
+    if (oldVersion < 6) {
+      await _upgradeV5toV6(db);
+    }
+  }
+
+  /// Adds the Packages module: `packages`/`package_services` master tables
+  /// plus the historical-snapshot columns on `visits`/`visit_services` and
+  /// `appointments`/`appointment_services`. Purely additive — no existing
+  /// row/column is touched, so all existing visits, appointments, payments
+  /// and reports are unaffected.
+  Future<void> _upgradeV5toV6(Database db) async {
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS packages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          description TEXT,
+          package_price REAL NOT NULL,
+          start_date TEXT NOT NULL,
+          expiry_date TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_date TEXT NOT NULL,
+          updated_date TEXT
+        )
+      ''');
+    } catch (_) {}
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS package_services (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          package_id INTEGER NOT NULL,
+          service_id INTEGER,
+          category_id INTEGER,
+          service_type_id INTEGER,
+          category_name_snapshot TEXT NOT NULL DEFAULT '',
+          service_type_name_snapshot TEXT,
+          service_name_snapshot TEXT NOT NULL,
+          normal_price REAL NOT NULL,
+          package_service_amount REAL NOT NULL,
+          quantity INTEGER NOT NULL DEFAULT 1,
+          created_date TEXT,
+          FOREIGN KEY (package_id) REFERENCES packages(id),
+          FOREIGN KEY (service_id) REFERENCES services(id),
+          FOREIGN KEY (category_id) REFERENCES categories(id),
+          FOREIGN KEY (service_type_id) REFERENCES service_types(id)
+        )
+      ''');
+    } catch (_) {}
+    for (final col in <String>[
+      'ALTER TABLE visits ADD COLUMN package_id INTEGER',
+      'ALTER TABLE visits ADD COLUMN package_name_snapshot TEXT',
+      'ALTER TABLE visits ADD COLUMN package_normal_total REAL',
+      'ALTER TABLE visits ADD COLUMN package_price REAL',
+      'ALTER TABLE visits ADD COLUMN package_discount REAL',
+      'ALTER TABLE visit_services ADD COLUMN is_package_item INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE visit_services ADD COLUMN package_id INTEGER',
+      'ALTER TABLE visit_services ADD COLUMN normal_price_snapshot REAL',
+      'ALTER TABLE appointments ADD COLUMN package_id INTEGER',
+      'ALTER TABLE appointments ADD COLUMN package_name_snapshot TEXT',
+      'ALTER TABLE appointments ADD COLUMN package_normal_total REAL',
+      'ALTER TABLE appointments ADD COLUMN package_price REAL',
+      'ALTER TABLE appointments ADD COLUMN package_discount REAL',
+      'ALTER TABLE appointment_services ADD COLUMN is_package_item INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE appointment_services ADD COLUMN package_id INTEGER',
+      'ALTER TABLE appointment_services ADD COLUMN normal_price_snapshot REAL',
+    ]) {
+      try {
+        await db.execute(col);
+      } catch (_) {
+        // Column may already exist.
+      }
+    }
+    await _createIndexesV6(db);
   }
 
   /// Adds the `is_favorite` flag to `services` so frequently-used services can
