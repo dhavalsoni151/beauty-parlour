@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/database/database.dart';
+import '../../core/providers/appointment_provider.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
 
@@ -18,6 +20,7 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
   final _reportDao = ReportDao();
   late TabController _tabController;
 
+  DateRange _currentRange = DateRange.thisMonth();
   String _startDate = DateRange.thisMonth().start.toIso8601String();
   String _endDate = DateRange.thisMonth().endExclusive.toIso8601String();
 
@@ -32,12 +35,13 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
   List<Map<String, dynamic>> _paymentBreakdown = [];
   List<Map<String, dynamic>> _expenseByCategory = [];
   List<Map<String, dynamic>> _birthdays = [];
+  Map<String, dynamic> _appointmentStats = {};
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadReports());
   }
 
@@ -67,6 +71,8 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
     final mmdd2 =
         '${now.month.toString().padLeft(2, '0')}-${lastDay.toString().padLeft(2, '0')}';
     _birthdays = await _reportDao.getBirthdaysInRange(mmdd1, mmdd2);
+    _appointmentStats =
+        await context.read<AppointmentProvider>().getAppointmentStats(_currentRange);
 
     if (mounted) setState(() => _isLoading = false);
   }
@@ -89,13 +95,19 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
             Tab(text: 'Customers'),
             Tab(text: 'Expenses'),
             Tab(text: 'Birthdays'),
+            Tab(text: 'Appointments'),
           ],
         ),
       ),
       body: Column(
         children: [
           DateRangeSelector(
-            onRangeSelected: (s, e, _) {
+            onRangeSelected: (s, e, label) {
+              _currentRange = DateRange(
+                start: DateTime.parse(s),
+                end: DateTime.parse(e).subtract(const Duration(days: 1)),
+                label: label,
+              );
               _startDate = s;
               _endDate = e;
               _loadReports();
@@ -133,6 +145,7 @@ class _ReportsHomeScreenState extends State<ReportsHomeScreen>
                 _ExpensesTab(
                     expenseByCategory: _expenseByCategory, summary: _summary),
                 _BirthdaysTab(birthdays: _birthdays),
+                _AppointmentsTab(stats: _appointmentStats),
               ],
             ),
           ),
@@ -1142,5 +1155,138 @@ class _BirthdaysTab extends StatelessWidget {
     ];
     final month = int.tryParse(parts[0]) ?? 1;
     return '${parts[1]} ${months[month - 1]}';
+  }
+}
+
+
+class _AppointmentsTab extends StatelessWidget {
+  final Map<String, dynamic> stats;
+
+  const _AppointmentsTab({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = (stats['total_appointments'] as num? ?? 0).toInt();
+    final pending = (stats['pending_count'] as num? ?? 0).toInt();
+    final completed = (stats['completed_count'] as num? ?? 0).toInt();
+    final notAttended = (stats['not_attended_count'] as num? ?? 0).toInt();
+    final cancelled = (stats['cancelled_count'] as num? ?? 0).toInt();
+    final completionRate = ((stats['completion_rate'] as num? ?? 0).toDouble() * 100);
+    final resolvedRate = ((stats['resolved_completion_rate'] as num? ?? 0).toDouble() * 100);
+    final cancellationRate = ((stats['cancellation_rate'] as num? ?? 0).toDouble() * 100);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: StatCard(
+                title: 'Total Appointments',
+                value: '$total',
+                icon: Icons.event_rounded,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StatCard(
+                title: 'Pending',
+                value: '$pending',
+                icon: Icons.schedule_rounded,
+                color: AppColors.warning,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: StatCard(
+                title: 'Completed',
+                value: '$completed',
+                icon: Icons.check_circle_rounded,
+                color: AppColors.success,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StatCard(
+                title: 'Cancelled',
+                value: '$cancelled',
+                icon: Icons.event_busy_rounded,
+                color: AppColors.error,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        StatCard(
+          title: 'Not Attended',
+          value: '$notAttended',
+          icon: Icons.person_off_rounded,
+          color: AppColors.textSecondary,
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Appointment Summary',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SummaryLine('Completion rate', '${completionRate.toStringAsFixed(1)}%'),
+              _SummaryLine('Resolved completion rate', '${resolvedRate.toStringAsFixed(1)}%'),
+              _SummaryLine('Cancellation rate', '${cancellationRate.toStringAsFixed(1)}%'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SummaryLine extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SummaryLine(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

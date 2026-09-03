@@ -44,15 +44,18 @@ class AppointmentProvider extends ChangeNotifier {
     _lastStatusFilter = status;
     notifyListeners();
 
-    _appointments = await _appointmentDao.getAll(
-      date: date,
-      startDate: startDate,
-      endDate: endDate,
-      customerId: customerId,
-      status: status,
-    );
-    _isLoading = false;
-    notifyListeners();
+    try {
+      _appointments = await _appointmentDao.getAll(
+        date: date,
+        startDate: startDate,
+        endDate: endDate,
+        customerId: customerId,
+        status: status,
+      );
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<Appointment?> getAppointment(int id) => _appointmentDao.get(id);
@@ -97,6 +100,9 @@ class AppointmentProvider extends ChangeNotifier {
     final latest = await _appointmentDao.get(appointment.id!);
     if (latest == null) {
       throw Exception('Appointment not found.');
+    }
+    if (latest.status != AppointmentStatus.pending) {
+      throw Exception('Only pending appointments can be completed.');
     }
 
     final service = latest.serviceId != null

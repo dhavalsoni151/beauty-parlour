@@ -307,6 +307,38 @@ class ReportDao {
     ''', [mmdd1, mmdd2]);
   }
 
+  Future<Map<String, dynamic>> getAppointmentStats(
+      String startDate, String endDate) async {
+    final db = await AppDatabase.instance.database;
+    final row = (await db.rawQuery('''
+      SELECT
+        COUNT(*) AS total_appointments,
+        SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS pending_count,
+        SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_count,
+        SUM(CASE WHEN status = 'NOT_ATTENDED' THEN 1 ELSE 0 END) AS not_attended_count,
+        SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_count
+      FROM appointments
+      WHERE appointment_date >= DATE(?) AND appointment_date < DATE(?)
+    ''', [startDate, endDate])).first;
+
+    final total = (row['total_appointments'] as num? ?? 0).toInt();
+    final completed = (row['completed_count'] as num? ?? 0).toInt();
+    final notAttended = (row['not_attended_count'] as num? ?? 0).toInt();
+    final cancelled = (row['cancelled_count'] as num? ?? 0).toInt();
+    final resolved = completed + notAttended + cancelled;
+
+    return {
+      'total_appointments': total,
+      'pending_count': (row['pending_count'] as num? ?? 0).toInt(),
+      'completed_count': completed,
+      'not_attended_count': notAttended,
+      'cancelled_count': cancelled,
+      'completion_rate': total > 0 ? completed / total : 0.0,
+      'resolved_completion_rate': resolved > 0 ? completed / resolved : 0.0,
+      'cancellation_rate': total > 0 ? cancelled / total : 0.0,
+    };
+  }
+
   // ── Expenses ──────────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> getExpenseByCategory(

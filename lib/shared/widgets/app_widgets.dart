@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/visit_models.dart';
+import '../../core/models/appointment_models.dart';
 import '../../core/utils/formatters.dart';
 
 class StatCard extends StatelessWidget {
@@ -96,6 +97,47 @@ class PaymentStatusBadge extends StatelessWidget {
       child: Text(
         status.label,
         style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _color, letterSpacing: 0.3),
+      ),
+    );
+  }
+}
+
+
+class AppointmentStatusBadge extends StatelessWidget {
+  final AppointmentStatus status;
+
+  const AppointmentStatusBadge({super.key, required this.status});
+
+  Color get _color {
+    switch (status) {
+      case AppointmentStatus.pending:
+        return AppColors.warning;
+      case AppointmentStatus.completed:
+        return AppColors.success;
+      case AppointmentStatus.notAttended:
+        return AppColors.error;
+      case AppointmentStatus.cancelled:
+        return AppColors.textSecondary;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: _color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _color.withOpacity(0.3)),
+      ),
+      child: Text(
+        status.label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: _color,
+          letterSpacing: 0.3,
+        ),
       ),
     );
   }

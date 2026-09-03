@@ -20,6 +20,8 @@ import 'features/expenses/expenses_screen.dart';
 import 'features/expenses/expense_form_screen.dart';
 import 'features/expenses/expense_categories_screen.dart';
 import 'features/reports/reports_home_screen.dart';
+import 'features/appointments/appointments_screen.dart';
+import 'features/appointments/appointment_form_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/backup_restore_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
@@ -38,6 +40,7 @@ final GoRouter _router = GoRouter(
         GoRoute(path: '/', builder: (c, s) => const DashboardScreen()),
         GoRoute(path: '/customers', builder: (c, s) => const CustomersListScreen()),
         GoRoute(path: '/reports', builder: (c, s) => const ReportsHomeScreen()),
+        GoRoute(path: '/appointments', builder: (c, s) => const AppointmentsScreen()),
       ],
     ),
     // Full-screen routes (no bottom nav)
@@ -48,6 +51,16 @@ final GoRouter _router = GoRouter(
         final customerId = s.uri.queryParameters['customerId'];
         return NewVisitScreen(preselectedCustomerId: customerId != null ? int.tryParse(customerId) : null);
       },
+    ),
+    GoRoute(
+      path: '/appointment/new',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const AppointmentFormScreen(),
+    ),
+    GoRoute(
+      path: '/appointment/:id/edit',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => AppointmentFormScreen(appointmentId: int.parse(s.pathParameters['id']!)),
     ),
     GoRoute(
       path: '/customer/new',
