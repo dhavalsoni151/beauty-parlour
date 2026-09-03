@@ -637,9 +637,12 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                         const SizedBox(height: 12),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedCategory?.id,
-                          decoration: const InputDecoration(
-                            labelText: 'Category *',
-                            prefixIcon: Icon(Icons.category_rounded),
+                          decoration: InputDecoration(
+                            // A package supplies its own services, so the
+                            // category is only required when adding individual
+                            // services (no package selected).
+                            labelText: _selectedPackage == null ? 'Category *' : 'Category',
+                            prefixIcon: const Icon(Icons.category_rounded),
                           ),
                           items: _categories
                               .map((category) => DropdownMenuItem<int>(
@@ -659,7 +662,9 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                             });
                             await _loadCategoryData(value);
                           },
-                          validator: (value) => value == null ? 'Please choose a category' : null,
+                          validator: (value) => (value == null && _selectedPackage == null)
+                              ? 'Please choose a category'
+                              : null,
                         ),
                         const SizedBox(height: 12),
                         if (_selectedCategory != null)
@@ -746,9 +751,11 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
                           ),
                         ] else ...[
                           const SizedBox(height: 8),
-                          const Text(
-                            'No services added yet. Choose a category and service above, then tap "Add Service". You can add multiple services, just like on a visit.',
-                            style: TextStyle(fontSize: 12, color: AppColors.textHint),
+                          Text(
+                            _selectedPackage == null
+                                ? 'No services added yet. Choose a category and service above, then tap "Add Service". You can add multiple services, just like on a visit.'
+                                : 'Add a package above, or choose a category and service to add individual services alongside it.',
+                            style: const TextStyle(fontSize: 12, color: AppColors.textHint),
                           ),
                         ],
                       ],
