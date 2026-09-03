@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/settings_provider.dart';
+import '../security/pin_pad.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -85,6 +86,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 'Backup or restore your data',
                 AppColors.info, () => context.push('/backup-restore')),
             ]),
+            const SizedBox(height: 16),
+
+            // Security
+            _buildSectionTitle('Security'),
+            const SizedBox(height: 10),
+            Consumer<SettingsProvider>(
+              builder: (context, settings, _) => _buildCard([
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: settings.isPinEnabled,
+                  activeColor: AppColors.primary,
+                  title: const Text('App PIN Lock',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  subtitle: const Text('Require a PIN every time the app is opened',
+                      style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  onChanged: (enable) => _onPinToggle(context, settings, enable),
+                ),
+                if (settings.isPinEnabled) ...[
+                  const Divider(height: 20),
+                  _buildMenuTile(
+                    Icons.password_rounded, 'Change PIN',
+                    'Set a new app-unlock PIN',
+                    AppColors.primary, () => context.push('/pin-setup')),
+                ],
+              ]),
+            ),
             const SizedBox(height: 16),
 
             // About
@@ -185,5 +212,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Future<void> _onPinToggle(BuildContext context, SettingsProvider settings, bool enable) async {
+    if (enable) {
+      final created = await context.push<bool>('/pin-setup');
+      if (created == true && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('App PIN lock enabled')));
+      }
+      return;
+    }
+
+    // Require the current PIN before disabling the lock.
+    final confirmedPin = await _promptCurrentPin(context, settings);
+    if (confirmedPin != true) return;
+    await settings.disablePin();
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('App PIN lock disabled')));
+    }
+  }
+
+  Future<bool?> _promptCurrentPin(BuildContext context, SettingsProvider settings) async {
+    String value = '';
+    String? error;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Enter Current PIN'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(error!, style: const TextStyle(fontSize: 12, color: AppColors.error)),
+                ),
+              PinPad(
+                value: value,
+                onChanged: (v) {
+                  setDialogState(() {
+                    value = v;
+                    error = null;
+                  });
+                  if (v.length == kPinLength) {
+                    if (settings.verifyPin(v)) {
+                      Navigator.pop(ctx, true);
+                    } else {
+                      setDialogState(() {
+                        error = 'Incorrect PIN';
+                        value = '';
+                      });
+                    }
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -49,6 +49,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
               category: cats[i],
               onEdit: () => _showCategoryDialog(context, provider, cats[i]),
               onToggle: () => provider.toggleActive(cats[i]),
+              onDelete: () => _deleteCategory(context, provider, cats[i]),
               onViewTypes: () =>
                   context.push('/service-types?categoryId=${cats[i].id}'),
               onViewServices: () =>
@@ -139,12 +140,47 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       ),
     );
   }
+
+  Future<void> _deleteCategory(
+      BuildContext context, CategoryProvider provider, Category category) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Category?'),
+        content: Text(
+            'Are you sure you want to delete "${category.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await provider.deleteCategory(category);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('"${category.name}" deleted')));
+      }
+    } on InUseException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
 }
 
 class _CategoryCard extends StatelessWidget {
   final Category category;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
+  final VoidCallback onDelete;
   final VoidCallback onViewTypes;
   final VoidCallback onViewServices;
 
@@ -152,6 +188,7 @@ class _CategoryCard extends StatelessWidget {
     required this.category,
     required this.onEdit,
     required this.onToggle,
+    required this.onDelete,
     required this.onViewTypes,
     required this.onViewServices,
   });
@@ -204,6 +241,7 @@ class _CategoryCard extends StatelessWidget {
               else if (v == 'toggle') onToggle();
               else if (v == 'types') onViewTypes();
               else if (v == 'services') onViewServices();
+              else if (v == 'delete') onDelete();
             },
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'types', child: ListTile(
@@ -215,6 +253,11 @@ class _CategoryCard extends StatelessWidget {
               PopupMenuItem(value: 'toggle', child: ListTile(
                 leading: Icon(category.isActive ? Icons.visibility_off_rounded : Icons.visibility_rounded),
                 title: Text(category.isActive ? 'Deactivate' : 'Activate'),
+                dense: true,
+              )),
+              const PopupMenuItem(value: 'delete', child: ListTile(
+                leading: Icon(Icons.delete_rounded, color: AppColors.error),
+                title: Text('Delete', style: TextStyle(color: AppColors.error)),
                 dense: true,
               )),
             ],

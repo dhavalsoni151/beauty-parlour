@@ -22,6 +22,7 @@ class BackupService {
     'service_types',
     'services',
     'visits',
+    'appointments',
     'visit_services',
     'payments',
     'write_offs',

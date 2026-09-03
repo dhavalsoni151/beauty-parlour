@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/dashboard_provider.dart';
+import '../../core/providers/appointment_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/providers/visit_provider.dart';
 import '../../core/database/daos/settings_dao.dart';
@@ -26,6 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DashboardProvider>().loadDashboard();
+      context.read<AppointmentProvider>().loadUpcomingAppointments();
       _checkMigrationReport();
     });
   }
@@ -73,6 +75,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<DashboardProvider>().loadDashboard();
+      context.read<AppointmentProvider>().loadUpcomingAppointments();
     }
   }
 
@@ -84,7 +87,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         builder: (context, dash, settings, _) {
           return RefreshIndicator(
             color: AppColors.primary,
-            onRefresh: () => dash.loadDashboard(),
+            onRefresh: () async {
+              await dash.loadDashboard();
+              if (context.mounted) {
+                await context.read<AppointmentProvider>().loadUpcomingAppointments();
+              }
+            },
             child: CustomScrollView(
               slivers: [
                 _buildAppBar(context, settings),
@@ -161,6 +169,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           const SectionHeader(title: "Today's Summary"),
           const SizedBox(height: 12),
           _TodayStats(stats: today),
+          const SizedBox(height: 20),
+
+          // Appointments
+          const SectionHeader(title: "Today's / Upcoming Appointments"),
+          const SizedBox(height: 12),
+          const _UpcomingAppointmentsSection(),
           const SizedBox(height: 20),
 
           // Sales trend chart
@@ -596,5 +610,103 @@ class _PaymentMethodChart extends StatelessWidget {
       case 'BANK_TRANSFER': return 'Bank Transfer';
       default: return 'Other';
     }
+  }
+}
+
+
+class _UpcomingAppointmentsSection extends StatelessWidget {
+  const _UpcomingAppointmentsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppointmentProvider>(
+      builder: (context, provider, _) {
+        final items = provider.upcomingAppointments.take(5).toList();
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.event_note_rounded, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Next reminders',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => context.push('/appointments'),
+                    child: const Text('View all'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (items.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No upcoming appointments.',
+                    style: TextStyle(fontSize: 13, color: AppColors.textHint),
+                  ),
+                )
+              else
+                ...items.map((appointment) => Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            margin: const EdgeInsets.only(top: 5),
+                            decoration: const BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  appointment.customerName ?? 'Customer #${appointment.customerId}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${appointment.serviceNameSnapshot} • ${AppFormatters.formatDate(DateTime.parse(appointment.appointmentDate))} • ${appointment.startTime}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          AppointmentStatusBadge(status: appointment.status),
+                        ],
+                      ),
+                    )),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

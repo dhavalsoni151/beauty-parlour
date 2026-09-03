@@ -37,8 +37,15 @@ dependencies:
   # UUID generation
   uuid: ^4.5.1
 
+  # Notifications
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+
   # Icons
   cupertino_icons: ^1.0.8
+
+  # PIN hashing (app lock)
+  crypto: ^3.0.5
 
 dev_dependencies:
   flutter_test:

@@ -1,3 +1,5 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../app_database.dart';
 import '../../models/customer_models.dart';
 import 'db_exceptions.dart';
@@ -64,5 +66,32 @@ class CategoryDao {
     final db = await AppDatabase.instance.database;
     await db.update('categories', {'display_order': displayOrder},
         where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Deletes a category, but only if it has no service types and no services
+  /// (directly or historically) referencing it. Throws [InUseException] if
+  /// the category is still in use, so the UI can show a friendly message
+  /// instead of failing on a foreign-key constraint.
+  Future<void> delete(int id) async {
+    final db = await AppDatabase.instance.database;
+
+    final serviceTypeCount = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM service_types WHERE category_id = ?', [id])) ??
+        0;
+    final serviceCount = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM services WHERE category_id = ?', [id])) ??
+        0;
+    final visitServiceCount = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM visit_services WHERE category_id = ?', [id])) ??
+        0;
+
+    if (serviceTypeCount > 0 || serviceCount > 0 || visitServiceCount > 0) {
+      throw const InUseException(
+          'This category cannot be deleted because it still has service types, '
+          'services, or past visits linked to it. Deactivate it instead, or '
+          'remove/reassign its service types and services first.');
+    }
+
+    await db.delete('categories', where: 'id = ?', whereArgs: [id]);
   }
 }

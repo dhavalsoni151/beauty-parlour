@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
+import 'core/providers/settings_provider.dart';
+import 'core/providers/app_lock_provider.dart';
+import 'features/security/pin_lock_screen.dart';
+import 'features/security/pin_setup_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/customers/customers_list_screen.dart';
 import 'features/customers/customer_form_screen.dart';
@@ -15,6 +20,8 @@ import 'features/expenses/expenses_screen.dart';
 import 'features/expenses/expense_form_screen.dart';
 import 'features/expenses/expense_categories_screen.dart';
 import 'features/reports/reports_home_screen.dart';
+import 'features/appointments/appointments_screen.dart';
+import 'features/appointments/appointment_form_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/backup_restore_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
@@ -33,6 +40,7 @@ final GoRouter _router = GoRouter(
         GoRoute(path: '/', builder: (c, s) => const DashboardScreen()),
         GoRoute(path: '/customers', builder: (c, s) => const CustomersListScreen()),
         GoRoute(path: '/reports', builder: (c, s) => const ReportsHomeScreen()),
+        GoRoute(path: '/appointments', builder: (c, s) => const AppointmentsScreen()),
       ],
     ),
     // Full-screen routes (no bottom nav)
@@ -43,6 +51,16 @@ final GoRouter _router = GoRouter(
         final customerId = s.uri.queryParameters['customerId'];
         return NewVisitScreen(preselectedCustomerId: customerId != null ? int.tryParse(customerId) : null);
       },
+    ),
+    GoRoute(
+      path: '/appointment/new',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const AppointmentFormScreen(),
+    ),
+    GoRoute(
+      path: '/appointment/:id/edit',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => AppointmentFormScreen(appointmentId: int.parse(s.pathParameters['id']!)),
     ),
     GoRoute(
       path: '/customer/new',
@@ -120,6 +138,11 @@ final GoRouter _router = GoRouter(
       parentNavigatorKey: _rootNavigatorKey,
       builder: (c, s) => const BackupRestoreScreen(),
     ),
+    GoRoute(
+      path: '/pin-setup',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const PinSetupScreen(),
+    ),
   ],
 );
 
@@ -135,6 +158,62 @@ class BeautyParlourApp extends StatelessWidget {
       themeMode: ThemeMode.light,
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
+      builder: (context, child) => _AppLockGate(child: child ?? const SizedBox.shrink()),
+    );
+  }
+}
+
+/// Wraps the whole app (via [MaterialApp.builder]) and shows [PinLockScreen]
+/// on top of everything whenever a PIN is configured and the session is
+/// currently locked (cold start, or resumed from the background).
+class _AppLockGate extends StatefulWidget {
+  final Widget child;
+  const _AppLockGate({required this.child});
+
+  @override
+  State<_AppLockGate> createState() => _AppLockGateState();
+}
+
+class _AppLockGateState extends State<_AppLockGate> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-lock whenever the app leaves the foreground so the PIN is required
+    // again every time the app is (re)opened, per the product requirement.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      context.read<AppLockProvider>().lock();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer2<SettingsProvider, AppLockProvider>(
+      builder: (context, settings, appLock, _) {
+        if (!settings.isLoaded) {
+          return const Material(
+            color: AppColors.background,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final showLock = settings.isPinEnabled && appLock.isLocked;
+        return Stack(
+          children: [
+            widget.child,
+            if (showLock) const PinLockScreen(),
+          ],
+        );
+      },
     );
   }
 }
