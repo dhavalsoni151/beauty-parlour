@@ -110,48 +110,63 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  Widget _buildAppBar(BuildContext context, SettingsProvider settings) {
-    return SliverAppBar(
-      expandedHeight: 120,
-      floating: false,
-      pinned: true,
-      elevation: 0,
-      backgroundColor: Colors.white,
-      flexibleSpace: FlexibleSpaceBar(
-        background: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [AppColors.primary, AppColors.primaryDark],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+Widget _buildAppBar(BuildContext context, SettingsProvider settings) {
+  return SliverAppBar(
+    expandedHeight: 120,
+    floating: false,
+    pinned: true,
+    elevation: 0,
+    backgroundColor: Colors.white,
+    flexibleSpace: FlexibleSpaceBar(
+      background: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppColors.primary,
+              AppColors.primaryDark,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Text(
-                    settings.parlourName,
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  settings.parlourName,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
                   ),
-                  Text(
-                    AppFormatters.formatDate(DateTime.now()),
-                    style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.8)),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
-        title: const Text('Dashboard',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-        titlePadding: const EdgeInsets.only(left: 16, bottom: 12),
       ),
-    );
-  }
+
+      // When collapsed, show parlour name instead of "Dashboard"
+      title: Text(
+        settings.parlourName,
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textPrimary,
+        ),
+      ),
+
+      titlePadding: const EdgeInsets.only(
+        left: 16,
+        bottom: 12,
+      ),
+    ),
+  );
+}
 
   Widget _buildContent(BuildContext context, DashboardProvider dash) {
     final today = dash.todayStats;
