@@ -17,7 +17,11 @@ import '../packages/package_picker_sheet.dart';
 class AppointmentFormScreen extends StatefulWidget {
   final int? appointmentId;
 
-  const AppointmentFormScreen({super.key, this.appointmentId});
+  /// When set (e.g. from the Customer Reminders "Book Appointment" action),
+  /// the form opens with this customer already selected.
+  final int? preselectedCustomerId;
+
+  const AppointmentFormScreen({super.key, this.appointmentId, this.preselectedCustomerId});
 
   @override
   State<AppointmentFormScreen> createState() => _AppointmentFormScreenState();
@@ -82,6 +86,17 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
 
     _customers = List<Customer>.from(customerProvider.allCustomers);
     _categories = List<Category>.from(categoryProvider.categories);
+
+    // Preselect a customer when the form was opened for booking a reminder.
+    if (widget.appointmentId == null && widget.preselectedCustomerId != null) {
+      final pre = await customerProvider.getCustomer(widget.preselectedCustomerId!);
+      if (pre != null) {
+        if (!_customers.any((c) => c.id == pre.id)) {
+          _customers = [..._customers, pre];
+        }
+        _selectedCustomer = pre;
+      }
+    }
 
     if (widget.appointmentId != null) {
       final appointment =

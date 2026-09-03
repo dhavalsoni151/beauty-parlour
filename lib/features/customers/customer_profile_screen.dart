@@ -5,7 +5,9 @@ import '../../core/theme/app_theme.dart';
 import '../../core/providers/customer_provider.dart';
 import '../../core/providers/visit_provider.dart';
 import '../../core/models/customer_models.dart';
+import '../../core/models/reminder_models.dart';
 import '../../core/models/visit_models.dart';
+import '../../core/database/daos/reminder_dao.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
 
@@ -21,6 +23,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
   Customer? _customer;
   Map<String, dynamic>? _stats;
   List<Visit> _visits = [];
+  List<Reminder> _reminders = [];
   bool _isLoading = true;
 
   @override
@@ -38,6 +41,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     for (final v in _visits) {
       v.services = await context.read<VisitProvider>().getVisit(v.id!).then((full) => full?.services ?? []);
     }
+    _reminders = await ReminderDao().getForCustomer(widget.customerId);
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -124,6 +128,14 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   _buildStatsRow(totalVisits, totalBilled, totalPaid, totalPending, lastVisit),
                   const SizedBox(height: 20),
 
+                  // Reminder / marketing activity
+                  if (_reminders.isNotEmpty) ...[
+                    SectionHeader(title: 'Reminder History (${_reminders.length})'),
+                    const SizedBox(height: 12),
+                    ..._reminders.map((r) => _ReminderHistoryTile(reminder: r)),
+                    const SizedBox(height: 20),
+                  ],
+
                   // Visit history
                   SectionHeader(title: 'Visit History (${_visits.length})'),
                   const SizedBox(height: 12),
@@ -193,6 +205,64 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _ReminderHistoryTile extends StatelessWidget {
+  final Reminder reminder;
+  const _ReminderHistoryTile({required this.reminder});
+
+  Color get _color {
+    switch (reminder.status) {
+      case ReminderStatus.opened:
+        return AppColors.success;
+      case ReminderStatus.previewed:
+        return AppColors.info;
+      case ReminderStatus.dismissed:
+        return AppColors.textHint;
+      case ReminderStatus.suggested:
+        return AppColors.warning;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.notifications_active_rounded, size: 18, color: _color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(reminder.status.label,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(reminder.reason ?? 'Reminder',
+                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          Text(AppFormatters.formatDate(DateTime.parse(reminder.reminderDate)),
+              style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+        ],
+      ),
     );
   }
 }

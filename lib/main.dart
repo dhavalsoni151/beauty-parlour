@@ -12,6 +12,7 @@ import 'core/providers/settings_provider.dart';
 import 'core/providers/app_lock_provider.dart';
 import 'core/providers/dashboard_provider.dart';
 import 'core/providers/package_provider.dart';
+import 'core/providers/reminder_provider.dart';
 import 'core/services/notification_service.dart';
 
 void main() async {
@@ -33,6 +34,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => ExpenseProvider()..loadExpenses()),
         ChangeNotifierProvider(create: (_) => DashboardProvider()),
         ChangeNotifierProvider(create: (_) => PackageProvider()..loadPackages()),
+        ChangeNotifierProvider(create: (_) => ReminderProvider()),
       ],
       child: const BeautyParlourApp(),
     ),

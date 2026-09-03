@@ -15,4 +15,5 @@ export 'daos/write_off_dao.dart';
 export 'daos/expense_dao.dart';
 export 'daos/report_dao.dart';
 export 'daos/package_dao.dart';
+export 'daos/reminder_dao.dart';
 export 'daos/backup_service.dart';

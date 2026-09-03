@@ -31,6 +31,7 @@ class BackupService {
     'write_offs',
     'expense_categories',
     'expenses',
+    'reminders',
   ];
 
   Future<Map<String, dynamic>> exportAllData() async {
