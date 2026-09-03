@@ -22,6 +22,8 @@ import 'features/expenses/expense_categories_screen.dart';
 import 'features/reports/reports_home_screen.dart';
 import 'features/appointments/appointments_screen.dart';
 import 'features/appointments/appointment_form_screen.dart';
+import 'features/packages/packages_screen.dart';
+import 'features/packages/package_form_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/backup_restore_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
@@ -143,6 +145,21 @@ final GoRouter _router = GoRouter(
       path: '/backup-restore',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (c, s) => const BackupRestoreScreen(),
+    ),
+    GoRoute(
+      path: '/packages',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const PackagesScreen(),
+    ),
+    GoRoute(
+      path: '/package/new',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const PackageFormScreen(),
+    ),
+    GoRoute(
+      path: '/package/:id/edit',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => PackageFormScreen(packageId: int.parse(s.pathParameters['id']!)),
     ),
     GoRoute(
       path: '/pin-setup',
