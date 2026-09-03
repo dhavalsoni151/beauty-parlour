@@ -292,9 +292,11 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
     Service? selectedService;
     List<ServiceType> types = [];
     List<Service> services = [];
+    int? loadedForCategoryId;
     final amountCtrl = TextEditingController();
 
     Future<void> reload(void Function(void Function()) setDialogState, int categoryId) async {
+      loadedForCategoryId = categoryId;
       types = await catProvider.getServiceTypesForCategory(categoryId);
       services = await svcProvider.getServicesForCategory(categoryId, onlyDirect: true);
       setDialogState(() {});
@@ -304,7 +306,7 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          if (services.isEmpty && types.isEmpty && selectedCategoryId != null) {
+          if (selectedCategoryId != null && loadedForCategoryId != selectedCategoryId) {
             reload(setDialogState, selectedCategoryId!);
           }
           return AlertDialog(
