@@ -27,8 +27,10 @@ import 'features/packages/package_form_screen.dart';
 import 'features/reminders/reminders_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/backup_restore_screen.dart';
+import 'features/settings/firestore_migration_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
 import 'features/splash/splash_screen.dart';
+import 'features/auth/startup_gate.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -160,6 +162,11 @@ final GoRouter _router = GoRouter(
       builder: (c, s) => const BackupRestoreScreen(),
     ),
     GoRoute(
+      path: '/firestore-migration',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const FirestoreMigrationScreen(),
+    ),
+    GoRoute(
       path: '/packages',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (c, s) => const PackagesScreen(),
@@ -194,7 +201,9 @@ class BeautyParlourApp extends StatelessWidget {
       themeMode: ThemeMode.light,
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
-      builder: (context, child) => _AppLockGate(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => StartupGate(
+        child: _AppLockGate(child: child ?? const SizedBox.shrink()),
+      ),
     );
   }
 }
