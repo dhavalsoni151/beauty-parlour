@@ -35,7 +35,12 @@ class FirebaseService {
   }
 
   Future<void> requireOnline() async {
-    final connectivityResult = await connectivity.checkConnectivity();
+    final connectivityResult = await connectivity.checkConnectivity().timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => throw const FirebaseOnlineException(
+        'Internet connection is required.',
+      ),
+    );
     if (connectivityResult.contains(ConnectivityResult.none)) {
       throw const FirebaseOnlineException('Internet connection is required.');
     }
@@ -44,7 +49,15 @@ class FirebaseService {
       await firestore
           .collection('_system')
           .doc('health')
-          .get(const GetOptions(source: Source.server));
+          .get(const GetOptions(source: Source.server))
+          .timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw const FirebaseOnlineException(
+              'Firebase is taking too long to respond. Check your connection and retry.',
+            ),
+          );
+    } on FirebaseOnlineException {
+      rethrow;
     } on FirebaseException catch (error) {
       throw FirebaseOnlineException(
         error.message ?? 'Firebase is unavailable. Check your connection.',

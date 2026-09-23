@@ -68,9 +68,11 @@ class AppDatabase {
   // ── Fresh install ────────────────────────────────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
+    // Fresh installs start with empty tables — no default catalogue or
+    // settings are inserted. The user restores their own JSON backup
+    // (Settings → Backup & Restore), which replaces everything anyway.
     await _createTablesV7(db);
     await _createIndexesV7(db);
-    await _seedDefaultData(db);
   }
 
   /// Customer Reminders module: `reminders` records each marketing/reminder
@@ -936,172 +938,6 @@ class AppDatabase {
     report.migratedExpensesTotal = expensesTotal;
 
     return report;
-  }
-
-  // ── Seed defaults (fresh installs only) ──────────────────────────────────
-
-  Future<void> _seedDefaultData(DatabaseExecutor db) async {
-    final now = DateTime.now().toIso8601String();
-
-    final defaultSettings = {
-      'parlour_name': 'Priyanka Beauty Parlour',
-      'owner_name': '',
-      'phone': '',
-      'address': '',
-      'currency': '₹',
-      'default_payment_method': 'CASH',
-    };
-    for (final entry in defaultSettings.entries) {
-      await db.insert('settings', {'key': entry.key, 'value': entry.value});
-    }
-
-    final expenseCategories = [
-      'Rent', 'Electricity', 'Water', 'Salaries', 'Products',
-      'Wax', 'Facial Products', 'Cleaning', 'Maintenance',
-      'Marketing', 'Equipment', 'Other'
-    ];
-    for (final cat in expenseCategories) {
-      await db.insert(
-          'expense_categories', {'name': cat, 'is_active': 1, 'created_date': now});
-    }
-
-    final serviceCategories = [
-      {'name': 'Wax', 'display_order': 1},
-      {'name': 'Facial', 'display_order': 2},
-      {'name': 'Hair', 'display_order': 3},
-      {'name': 'Manicure', 'display_order': 4},
-      {'name': 'Pedicure', 'display_order': 5},
-      {'name': 'Makeup', 'display_order': 6},
-      {'name': 'Hair Spa', 'display_order': 7},
-      {'name': 'Threading', 'display_order': 8},
-      {'name': 'Other', 'display_order': 9},
-    ];
-    final categoryIds = <String, int>{};
-    for (final cat in serviceCategories) {
-      final id = await db.insert('categories', {
-        'name': cat['name'],
-        'is_active': 1,
-        'created_date': now,
-        'display_order': cat['display_order'],
-      });
-      categoryIds[cat['name'] as String] = id;
-    }
-
-    await _seedDefaultServices(db, categoryIds, now);
-  }
-
-  /// Pre-fills the master service catalogue (subcategories + services with
-  /// their real-world prices) on a fresh install, so the price list is ready
-  /// to use out of the box instead of starting empty.
-  Future<void> _seedDefaultServices(
-    DatabaseExecutor db,
-    Map<String, int> categoryIds,
-    String now,
-  ) async {
-    Future<int> insertServiceType(
-      String categoryName,
-      String typeName,
-      int order,
-    ) {
-      return db.insert('service_types', {
-        'category_id': categoryIds[categoryName],
-        'name': typeName,
-        'is_active': 1,
-        'display_order': order,
-        'created_date': now,
-      });
-    }
-
-    Future<void> insertService(
-      String categoryName,
-      int? serviceTypeId,
-      String name,
-      double price,
-      int order,
-    ) {
-      return db.insert('services', {
-        'category_id': categoryIds[categoryName],
-        'service_type_id': serviceTypeId,
-        'name': name,
-        'default_price': price,
-        'is_active': 1,
-        'display_order': order,
-        'created_date': now,
-      });
-    }
-
-    // Wax → Regular Wax
-    final regularWaxId = await insertServiceType('Wax', 'Regular Wax', 1);
-    final regularWax = {
-      'Full Hand': 120.0,
-      'Full Legs': 250.0,
-      'Under Arms': 60.0,
-      'Half Legs': 120.0,
-      'Face Wax': 120.0,
-    };
-    var order = 1;
-    for (final entry in regularWax.entries) {
-      await insertService('Wax', regularWaxId, entry.key, entry.value, order++);
-    }
-
-    // Wax → Rica Wax
-    final ricaWaxId = await insertServiceType('Wax', 'Rica Wax', 2);
-    final ricaWax = {
-      'Bikini': 500.0,
-      'Full Hands': 250.0,
-      'Underarm': 100.0,
-      'Half Legs': 250.0,
-      'Face Wax': 200.0,
-    };
-    order = 1;
-    for (final entry in ricaWax.entries) {
-      await insertService('Wax', ricaWaxId, entry.key, entry.value, order++);
-    }
-
-    // Wax → Cream Wax
-    final creamWaxId = await insertServiceType('Wax', 'Cream Wax', 3);
-    final creamWax = {
-      'Full Hands': 170.0,
-      'Half Legs': 170.0,
-      'Full Legs': 350.0,
-      'Underarm': 70.0,
-      'Bikini': 400.0,
-      'Face Wax': 150.0,
-    };
-    order = 1;
-    for (final entry in creamWax.entries) {
-      await insertService('Wax', creamWaxId, entry.key, entry.value, order++);
-    }
-
-    // Hair → Colour
-    await insertService('Hair', null, 'Colour', 150.0, 1);
-
-    // Hair Spa → Hair Spa
-    await insertService('Hair Spa', null, 'Hair Spa', 500.0, 1);
-
-    // Threading → Eye Brow
-    await insertService('Threading', null, 'Eye Brow', 50.0, 1);
-
-    // Facial (no sub-types, direct services)
-    final facial = {
-      'Fruit': 500.0,
-      'Lotus': 800.0,
-      'O3 - 10 Steps': 1500.0,
-      'O3 - 7 Steps': 1200.0,
-    };
-    order = 1;
-    for (final entry in facial.entries) {
-      await insertService('Facial', null, entry.key, entry.value, order++);
-    }
-
-    // Manicure → Regular
-    await insertService('Manicure', null, 'Regular', 350.0, 1);
-
-    // Pedicure → Regular
-    await insertService('Pedicure', null, 'Regular', 450.0, 1);
-
-    // Makeup → Simple Makeup
-    await insertService('Makeup', null, 'Simple Makeup', 1000.0, 1);
   }
 }
 

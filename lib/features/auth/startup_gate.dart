@@ -18,7 +18,10 @@ class _StartupGateState extends State<StartupGate> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<FirebaseStartupProvider>().checkStartup();
+      final startup = context.read<FirebaseStartupProvider>();
+      if (!startup.isReady) {
+        startup.checkStartup();
+      }
     });
   }
 

@@ -44,11 +44,17 @@ final GoRouter _router = GoRouter(
       builder: (context, state, child) => MainScaffold(child: child),
       routes: [
         GoRoute(path: '/', builder: (c, s) => const DashboardScreen()),
-        GoRoute(path: '/splash', builder: (c, s) => const SplashScreen()),
         GoRoute(path: '/customers', builder: (c, s) => const CustomersListScreen()),
         GoRoute(path: '/reports', builder: (c, s) => const ReportsHomeScreen()),
         GoRoute(path: '/appointments', builder: (c, s) => const AppointmentsScreen()),
       ],
+    ),
+    // Full-screen splash (no bottom nav). Shown once per cold start, then
+    // replaced by the dashboard.
+    GoRoute(
+      path: '/splash',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const SplashScreen(),
     ),
     // Full-screen routes (no bottom nav)
     GoRoute(

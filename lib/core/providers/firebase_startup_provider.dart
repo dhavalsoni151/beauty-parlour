@@ -18,12 +18,16 @@ enum FirebaseStartupState {
 }
 
 class FirebaseStartupProvider extends ChangeNotifier {
-  FirebaseStartupProvider({FirebaseStartupBackend? backend})
-    : _backend =
-          backend ??
-          FirebaseStartupBackend.fromService(FirebaseService.instance);
+  FirebaseStartupProvider({
+    FirebaseStartupBackend? backend,
+    String? firebaseInitError,
+  }) : _backend =
+           backend ??
+           FirebaseStartupBackend.fromService(FirebaseService.instance),
+       _initError = firebaseInitError;
 
   final FirebaseStartupBackend _backend;
+  final String? _initError;
   FirebaseStartupState _state = FirebaseStartupState.initializing;
   String? _errorMessage;
 
@@ -34,6 +38,14 @@ class FirebaseStartupProvider extends ChangeNotifier {
 
   Future<void> checkStartup() async {
     _setState(FirebaseStartupState.initializing);
+    // Firebase SDK itself failed to start (e.g. no network on cold start,
+    // App Check failure, unsupported platform). Surface it instead of
+    // hanging on the splash/loading screen.
+    if (_initError != null) {
+      _errorMessage = _initError;
+      _setState(FirebaseStartupState.error);
+      return;
+    }
     try {
       final uid = _backend.currentUserUid;
       if (uid == null) {
@@ -163,7 +175,13 @@ class _FirebaseServiceStartupBackend implements FirebaseStartupBackend {
           .doc(firebaseOrganizationId)
           .collection('members')
           .doc(uid)
-          .get(const GetOptions(source: Source.server));
+          .get(const GetOptions(source: Source.server))
+          .timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw const FirebaseOnlineException(
+              'Firebase is taking too long to respond. Check your connection and retry.',
+            ),
+          );
       final data = member.data();
       if (!member.exists || data == null) return null;
       return data['role'] as String?;

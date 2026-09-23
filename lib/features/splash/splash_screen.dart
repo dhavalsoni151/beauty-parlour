@@ -11,17 +11,22 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
 
-    Timer(const Duration(seconds: 2), () {
+    _timer = Timer(const Duration(seconds: 2), () {
       if (!mounted) return;
-
       context.go('/');
-      // We will navigate using GoRouter here.
-      // This will be replaced below.
     });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -56,6 +61,11 @@ class _SplashScreenState extends State<SplashScreen> {
                   child: Image.asset(
                     'assets/images/logo.png',
                     fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => const Icon(
+                      Icons.spa_rounded,
+                      size: 56,
+                      color: AppColors.primary,
+                    ),
                   ),
                 ),
 
