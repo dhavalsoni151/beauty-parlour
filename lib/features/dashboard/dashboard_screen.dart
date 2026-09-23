@@ -11,8 +11,11 @@ import '../../core/providers/visit_provider.dart';
 import '../../core/database/daos/settings_dao.dart';
 import '../../core/database/daos/reminder_dao.dart';
 import '../../core/database/migration_mapping.dart';
+import '../../core/models/reminder_models.dart';
+import '../../core/providers/reminder_provider.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
+import '../../shared/utils/whatsapp_share.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -211,6 +214,10 @@ Widget _buildAppBar(BuildContext context, SettingsProvider settings) {
 
           // Customer reminders (uses the same query/rules as the Reminders screen)
           const _CustomerRemindersCard(),
+          const SizedBox(height: 20),
+
+          // Same-date-last-month ("monthly anniversary") reminders
+          const _MonthlyAnniversaryRemindersCard(),
           const SizedBox(height: 20),
 
           // Sales trend chart
@@ -801,6 +808,115 @@ class _CustomerRemindersCardState extends State<_CustomerRemindersCard> {
           Text(label,
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Home page card for customers whose latest visit was on this same calendar
+/// date, one month ago (the "monthly anniversary" reminder). Lets the user
+/// send a WhatsApp reminder directly from the dashboard.
+class _MonthlyAnniversaryRemindersCard extends StatefulWidget {
+  const _MonthlyAnniversaryRemindersCard();
+
+  @override
+  State<_MonthlyAnniversaryRemindersCard> createState() =>
+      _MonthlyAnniversaryRemindersCardState();
+}
+
+class _MonthlyAnniversaryRemindersCardState
+    extends State<_MonthlyAnniversaryRemindersCard> {
+  List<ReminderCandidate> _candidates = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    var candidates = await ReminderDao().findMonthlyAnniversaryCandidates();
+    candidates = await ReminderDao().attachServices(candidates);
+    if (mounted) setState(() { _candidates = candidates; _loading = false; });
+  }
+
+  Future<void> _sendReminder(ReminderCandidate c) async {
+    final provider = context.read<ReminderProvider>();
+    final parlourName = context.read<SettingsProvider>().parlourName;
+    await provider.recordActivity(c, ReminderStatus.previewed);
+    if (!mounted) return;
+    final message = provider.renderMessage(c, parlourName: parlourName);
+    await WhatsAppShare.previewAndSend(
+      context,
+      title: 'Monthly Reminder — ${c.customer.name}',
+      message: message,
+      subject: 'Reminder',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.event_repeat_rounded, color: AppColors.primary),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Monthly Reminders (Same Date Last Month)',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_candidates.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No customers visited on this date last month.',
+                style: TextStyle(fontSize: 13, color: AppColors.textHint),
+              ),
+            )
+          else
+            ..._candidates.map((c) => Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(c.customer.name,
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                            if (c.lastVisitDate != null)
+                              Text('Last visit: ${AppFormatters.formatDate(c.lastVisitDate!)}',
+                                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                          ],
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _sendReminder(c),
+                        icon: const Icon(Icons.chat_rounded, size: 16),
+                        label: const Text('WhatsApp'),
+                      ),
+                    ],
+                  ),
+                )),
         ],
       ),
     );

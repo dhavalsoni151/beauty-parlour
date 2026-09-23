@@ -3,10 +3,12 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/package_provider.dart';
+import '../../core/providers/settings_provider.dart';
 import '../../core/database/daos/db_exceptions.dart';
 import '../../core/models/package_models.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
+import '../../shared/utils/whatsapp_share.dart';
 
 class PackagesScreen extends StatefulWidget {
   const PackagesScreen({super.key});
@@ -130,6 +132,11 @@ class _PackageCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 IconButton(
+                  icon: const Icon(Icons.share_rounded, color: AppColors.primary, size: 20),
+                  tooltip: 'Share on WhatsApp',
+                  onPressed: () => _share(context),
+                ),
+                IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 20),
                   onPressed: () => _delete(context),
                 ),
@@ -139,6 +146,44 @@ class _PackageCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _share(BuildContext context) async {
+    final String parlourName = context.read<SettingsProvider>().parlourName;
+    final message = _buildShareMessage(parlourName);
+    await WhatsAppShare.previewAndSend(
+      context,
+      title: 'Share Package',
+      message: message,
+      subject: package.name,
+    );
+  }
+
+  /// Builds the WhatsApp message for this package, including the individual
+  /// services, the actual (normal) price and the discounted package price.
+  String _buildShareMessage(String parlourName) {
+    final buffer = StringBuffer();
+    if (parlourName.isNotEmpty) {
+      buffer.writeln('*$parlourName*');
+    }
+    buffer.writeln('*${package.name}*');
+    if (package.description != null && package.description!.isNotEmpty) {
+      buffer.writeln(package.description);
+    }
+    buffer.writeln();
+    buffer.writeln('Included services:');
+    for (final s in package.services) {
+      buffer.writeln('• ${s.serviceNameSnapshot} — ${AppFormatters.formatCurrency(s.packageServiceAmount)}');
+    }
+    buffer.writeln();
+    buffer.writeln('Actual Price: ${AppFormatters.formatCurrency(package.normalTotal)}');
+    buffer.writeln('Package Price: ${AppFormatters.formatCurrency(package.packagePrice)}');
+    buffer.writeln('You Save: ${AppFormatters.formatCurrency(package.discount)}');
+    final expiry = DateTime.tryParse(package.expiryDate);
+    if (expiry != null) {
+      buffer.writeln('Valid till: ${AppFormatters.formatDate(expiry)}');
+    }
+    return buffer.toString().trim();
   }
 
   Future<void> _delete(BuildContext context) async {

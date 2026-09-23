@@ -146,6 +146,69 @@ class ReminderDao {
     return candidates;
   }
 
+  /// Finds customers whose latest completed visit was exactly one calendar
+  /// month before today (e.g. visited on the 15th last month, today is the
+  /// 15th) — used for the Home page "monthly anniversary" reminder so a
+  /// customer who visits monthly gets flagged on the same date each time.
+  Future<List<ReminderCandidate>> findMonthlyAnniversaryCandidates({
+    ReminderSort sort = ReminderSort.nameAsc,
+  }) async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone,
+             lv.id AS last_visit_id, lv.visit_date AS last_visit_date, lv.final_total AS final_total,
+             lv.package_id AS package_id, lv.package_name_snapshot AS package_name_snapshot,
+             lv.package_normal_total AS package_normal_total, lv.package_price AS package_price,
+             lv.package_discount AS package_discount,
+             lv.total_paid AS total_paid, lv.pending_amount AS pending_amount
+      FROM customers c
+      JOIN visits lv ON lv.id = (
+        SELECT v2.id FROM visits v2
+        WHERE v2.customer_id = c.id
+        ORDER BY date(v2.visit_date) DESC, v2.id DESC
+        LIMIT 1
+      )
+      WHERE c.is_active = 1
+        AND date(lv.visit_date) = date('now', 'localtime', '-1 month')
+    ''');
+
+    final today = _today();
+    var candidates = rows.map((r) {
+      final lastVisitDateStr = r['last_visit_date'] as String?;
+      DateTime? lastVisitDate;
+      int? daysSince;
+      if (lastVisitDateStr != null) {
+        lastVisitDate = DateTime.tryParse(lastVisitDateStr);
+        if (lastVisitDate != null) {
+          daysSince = today
+              .difference(DateTime(lastVisitDate.year, lastVisitDate.month, lastVisitDate.day))
+              .inDays;
+        }
+      }
+      return ReminderCandidate(
+        customer: CustomerInfo(
+          id: r['customer_id'] as int,
+          name: r['customer_name'] as String,
+          phone: r['customer_phone'] as String?,
+        ),
+        lastVisitId: r['last_visit_id'] as int?,
+        lastVisitDate: lastVisitDate,
+        lastVisitAmount: (r['final_total'] as num?)?.toDouble(),
+        daysSinceVisit: daysSince,
+        packageId: r['package_id'] as int?,
+        packageName: r['package_name_snapshot'] as String?,
+        packageNormalTotal: (r['package_normal_total'] as num?)?.toDouble(),
+        packagePrice: (r['package_price'] as num?)?.toDouble(),
+        packageDiscount: (r['package_discount'] as num?)?.toDouble(),
+        visitTotalPaid: (r['total_paid'] as num?)?.toDouble(),
+        visitPendingAmount: (r['pending_amount'] as num?)?.toDouble(),
+      );
+    }).toList();
+
+    _sort(candidates, sort);
+    return candidates;
+  }
+
   /// Dashboard counts using the exact same business rule as [findCandidates]
   /// (latest visit older than the given bucket, no amount filter), returned in
   /// one grouped query so the dashboard does not re-implement the logic.

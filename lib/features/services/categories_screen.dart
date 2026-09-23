@@ -3,9 +3,12 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/category_provider.dart';
+import '../../core/providers/settings_provider.dart';
 import '../../core/models/customer_models.dart';
 import '../../core/database/daos/db_exceptions.dart';
+import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
+import '../../shared/utils/whatsapp_share.dart';
 
 class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({super.key});
@@ -54,6 +57,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                   context.push('/service-types?categoryId=${cats[i].id}'),
               onViewServices: () =>
                   context.push('/services?categoryId=${cats[i].id}'),
+              onShare: () => _shareCategory(context, cats[i]),
             ),
           );
         },
@@ -141,6 +145,40 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     );
   }
 
+  /// Builds a WhatsApp-ready list of all active services in [category] and
+  /// shows the preview/send dialog.
+  Future<void> _shareCategory(BuildContext context, Category category) async {
+    final services = await context
+        .read<ServiceProvider>()
+        .getServicesForCategory(category.id!);
+    if (!context.mounted) return;
+    if (services.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('"${category.name}" has no active services to share')));
+      return;
+    }
+    final String parlourName = context.read<SettingsProvider>().parlourName;
+    final buffer = StringBuffer();
+    if (parlourName.isNotEmpty) {
+      buffer.writeln('*$parlourName*');
+    }
+    buffer.writeln('*${category.name} — Services*');
+    buffer.writeln();
+    for (final s in services) {
+      final typeLabel = (s.serviceTypeName != null && s.serviceTypeName!.isNotEmpty)
+          ? ' (${s.serviceTypeName})'
+          : '';
+      buffer.writeln('• ${s.name}$typeLabel — ${AppFormatters.formatCurrency(s.defaultPrice)}');
+    }
+    if (!context.mounted) return;
+    await WhatsAppShare.previewAndSend(
+      context,
+      title: 'Share ${category.name} Services',
+      message: buffer.toString().trim(),
+      subject: '${category.name} Services',
+    );
+  }
+
   Future<void> _deleteCategory(
       BuildContext context, CategoryProvider provider, Category category) async {
     final confirmed = await showDialog<bool>(
@@ -183,6 +221,7 @@ class _CategoryCard extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onViewTypes;
   final VoidCallback onViewServices;
+  final VoidCallback onShare;
 
   const _CategoryCard({
     required this.category,
@@ -191,6 +230,7 @@ class _CategoryCard extends StatelessWidget {
     required this.onDelete,
     required this.onViewTypes,
     required this.onViewServices,
+    required this.onShare,
   });
 
   @override
@@ -241,6 +281,7 @@ class _CategoryCard extends StatelessWidget {
               else if (v == 'toggle') onToggle();
               else if (v == 'types') onViewTypes();
               else if (v == 'services') onViewServices();
+              else if (v == 'share') onShare();
               else if (v == 'delete') onDelete();
             },
             itemBuilder: (_) => [
@@ -248,6 +289,8 @@ class _CategoryCard extends StatelessWidget {
                 leading: Icon(Icons.account_tree_rounded), title: Text('View Service Types'), dense: true)),
               const PopupMenuItem(value: 'services', child: ListTile(
                 leading: Icon(Icons.list_rounded), title: Text('View Services'), dense: true)),
+              const PopupMenuItem(value: 'share', child: ListTile(
+                leading: Icon(Icons.share_rounded), title: Text('Share on WhatsApp'), dense: true)),
               const PopupMenuItem(value: 'edit', child: ListTile(
                 leading: Icon(Icons.edit_rounded), title: Text('Edit'), dense: true)),
               PopupMenuItem(value: 'toggle', child: ListTile(
