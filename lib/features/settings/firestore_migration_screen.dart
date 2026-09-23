@@ -4,11 +4,22 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../core/database/daos/backup_service.dart';
+import '../../core/database/migration_mapping.dart';
 import '../../core/firebase/firebase_service.dart';
 import '../../core/firestore/firestore_migration.dart';
 import '../../core/firestore/firestore_repositories.dart';
+import '../../core/firestore/firestore_restore.dart';
+import '../../core/providers/appointment_provider.dart';
+import '../../core/providers/category_provider.dart';
+import '../../core/providers/customer_provider.dart';
+import '../../core/providers/dashboard_provider.dart';
+import '../../core/providers/expense_provider.dart';
 import '../../core/providers/firebase_startup_provider.dart';
+import '../../core/providers/service_provider.dart';
+import '../../core/providers/visit_provider.dart';
 import '../../core/theme/app_theme.dart';
 
 class FirestoreMigrationAuthorization {
@@ -46,6 +57,8 @@ class _FirestoreMigrationScreenState extends State<FirestoreMigrationScreen> {
   bool _checkingAccess = true;
   bool _authorized = false;
   bool _busy = false;
+  String? _restoreStatus;
+  MigrationReport? _restoreReport;
 
   @override
   void initState() {
@@ -139,6 +152,91 @@ class _FirestoreMigrationScreenState extends State<FirestoreMigrationScreen> {
     }
   }
 
+  Future<void> _restoreFromFirestore() async {
+    if (_busy) return;
+    final confirmed = await _confirmRestore();
+    if (!confirmed || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _restoreStatus = 'Downloading data from Firestore...';
+      _restoreReport = null;
+    });
+    try {
+      final scope = FirestoreScope(
+        firestore: FirebaseService.instance.firestore,
+        organizationId: firebaseOrganizationId,
+      );
+      final bundle = await FirestoreRestoreService(scope).downloadBackup(
+        onProgress: (status) {
+          if (!mounted) return;
+          setState(() => _restoreStatus = status);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _restoreStatus = 'Restoring local database...');
+      final report = await BackupService().importData(bundle);
+      if (!mounted) return;
+      await _reloadAppState();
+      if (!mounted) return;
+      setState(() {
+        _restoreReport = report;
+        _busy = false;
+        _restoreStatus = 'Restore from Firestore completed.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = error.toString();
+        _restoreStatus = 'Restore from Firestore failed.';
+      });
+    }
+  }
+
+  Future<bool> _confirmRestore() async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore from Firestore'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('This REPLACES all local data with what is stored in Firestore. This cannot be undone.'),
+            const SizedBox(height: 16),
+            TextField(controller: controller, decoration: const InputDecoration(labelText: 'Type RESTORE to continue')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(context, controller.text.trim() == 'RESTORE'),
+            child: const Text('Restore data'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return confirmed == true;
+  }
+
+  /// Re-fetches every provider's cached data after a Firestore restore so the
+  /// rest of the app immediately reflects the restored database.
+  Future<void> _reloadAppState() async {
+    await Future.wait([
+      context.read<CustomerProvider>().loadCustomers(),
+      context.read<CategoryProvider>().loadCategories(),
+      context.read<ServiceProvider>().loadServices(),
+      context.read<VisitProvider>().loadVisits(),
+      context.read<AppointmentProvider>().loadAppointments(),
+      context.read<ExpenseProvider>().loadExpenses(),
+      context.read<DashboardProvider>().loadDashboard(),
+    ]);
+  }
+
   Future<bool> _confirmWrites() async {
     final controller = TextEditingController();
     final confirmed = await showDialog<bool>(
@@ -206,6 +304,34 @@ class _FirestoreMigrationScreenState extends State<FirestoreMigrationScreen> {
               _readback!.matchesPlan(plan!) ? 'Reconciliation succeeded' : 'Reconciliation failed',
               _readback!.matchesPlan(plan) ? 'All records, snapshots, counts, and financial totals match.' : 'Review missing or mismatched records before any cutover.',
               color: _readback!.matchesPlan(plan) ? AppColors.success : AppColors.error,
+            ),
+          ],
+          const SizedBox(height: 28),
+          const Divider(),
+          const SizedBox(height: 12),
+          const Text('Restore from Firestore', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          const SizedBox(height: 6),
+          const Text(
+            'Rebuilds the local database on this device from what is currently stored in Firestore. Use this to recover data on a new device or after data loss.',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: _busy ? null : _restoreFromFirestore,
+            icon: const Icon(Icons.cloud_download_rounded),
+            label: const Text('Restore from Firestore'),
+          ),
+          if (_restoreStatus != null) ...[
+            const SizedBox(height: 12),
+            _message('Restore status', _restoreStatus!),
+          ],
+          if (_restoreReport != null) ...[
+            const SizedBox(height: 12),
+            _message(
+              _restoreReport!.financialMatches ? 'Restore succeeded' : 'Restore completed with mismatches',
+              _restoreReport!.buildSummary(),
+              color: _restoreReport!.financialMatches ? AppColors.success : AppColors.warning,
             ),
           ],
         ],

@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/category_provider.dart';
+import '../../core/providers/settings_provider.dart';
 import '../../core/models/customer_models.dart';
 import '../../core/database/daos/db_exceptions.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
+import '../../shared/utils/whatsapp_share.dart';
 
 class ServicesScreen extends StatefulWidget {
   final int? initialCategoryId;
@@ -17,6 +19,9 @@ class ServicesScreen extends StatefulWidget {
 }
 
 class _ServicesScreenState extends State<ServicesScreen> {
+  bool _selectionMode = false;
+  final Set<int> _selectedIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -29,11 +34,43 @@ class _ServicesScreenState extends State<ServicesScreen> {
     });
   }
 
+  void _toggleSelectionMode() {
+    setState(() {
+      _selectionMode = !_selectionMode;
+      if (!_selectionMode) _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelected(int id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Services')),
+      appBar: AppBar(
+        title: Text(_selectionMode ? '${_selectedIds.length} selected' : 'Services'),
+        actions: [
+          if (_selectionMode)
+            IconButton(
+              tooltip: 'Share selected on WhatsApp',
+              icon: const Icon(Icons.share_rounded),
+              onPressed: _selectedIds.isEmpty ? null : _shareSelected,
+            ),
+          IconButton(
+            tooltip: _selectionMode ? 'Cancel selection' : 'Select services to share',
+            icon: Icon(_selectionMode ? Icons.close_rounded : Icons.checklist_rounded),
+            onPressed: _toggleSelectionMode,
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
@@ -85,6 +122,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, i) => _ServiceCard(
                     service: services[i],
+                    selectionMode: _selectionMode,
+                    selected: _selectedIds.contains(services[i].id),
+                    onSelectToggle: () => _toggleSelected(services[i].id!),
                     onEdit: () => _showServiceDialog(context, services[i]),
                     onToggle: () =>
                         context.read<ServiceProvider>().toggleActive(services[i]),
@@ -98,12 +138,43 @@ class _ServicesScreenState extends State<ServicesScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showServiceDialog(context),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add Service'),
-      ),
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _showServiceDialog(context),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add Service'),
+            ),
     );
+  }
+
+  Future<void> _shareSelected() async {
+    final all = context.read<ServiceProvider>().allServices;
+    final selected = all.where((s) => _selectedIds.contains(s.id)).toList();
+    if (selected.isEmpty) return;
+    final String parlourName = context.read<SettingsProvider>().parlourName;
+    final buffer = StringBuffer();
+    if (parlourName.isNotEmpty) {
+      buffer.writeln('*$parlourName*');
+    }
+    buffer.writeln('*Services*');
+    buffer.writeln();
+    for (final s in selected) {
+      final typeLabel = (s.serviceTypeName != null && s.serviceTypeName!.isNotEmpty)
+          ? ' (${s.serviceTypeName})'
+          : '';
+      final catLabel = (s.categoryName != null && s.categoryName!.isNotEmpty)
+          ? '[${s.categoryName}] '
+          : '';
+      buffer.writeln('• $catLabel${s.name}$typeLabel — ${AppFormatters.formatCurrency(s.defaultPrice)}');
+    }
+    final sent = await WhatsAppShare.previewAndSend(
+      context,
+      title: 'Share Selected Services',
+      message: buffer.toString().trim(),
+      subject: 'Services',
+    );
+    if (sent && mounted) _toggleSelectionMode();
   }
 
   Widget _buildChip(String label, int? categoryId, ServiceProvider provider) {
@@ -336,6 +407,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
 class _ServiceCard extends StatelessWidget {
   final Service service;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback onSelectToggle;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
   final VoidCallback onToggleFavorite;
@@ -343,6 +417,9 @@ class _ServiceCard extends StatelessWidget {
 
   const _ServiceCard(
       {required this.service,
+      required this.selectionMode,
+      required this.selected,
+      required this.onSelectToggle,
       required this.onEdit,
       required this.onToggle,
       required this.onToggleFavorite,
@@ -350,15 +427,24 @@ class _ServiceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: selectionMode ? onSelectToggle : null,
+      child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: service.isActive ? Colors.white : const Color(0xFFF5F5F5),
+        color: selected
+            ? AppColors.primaryContainer
+            : (service.isActive ? Colors.white : const Color(0xFFF5F5F5)),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: selected ? AppColors.primary : AppColors.divider),
       ),
       child: Row(
         children: [
+          if (selectionMode) ...[
+            Checkbox(value: selected, onChanged: (_) => onSelectToggle()),
+            const SizedBox(width: 4),
+          ],
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
@@ -460,6 +546,7 @@ class _ServiceCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
       ),
     );
   }
