@@ -32,6 +32,10 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
 
   final List<PackageService> _services = [];
 
+  /// Collapse/expand state for the service picker sections (favorites + per
+  /// category), keyed the same way as the New Visit service picker.
+  final Set<String> _collapsedSections = {};
+
   bool get _isEditing => widget.packageId != null;
 
   @override
@@ -42,6 +46,7 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
 
   Future<void> _load() async {
     await context.read<CategoryProvider>().loadCategories();
+    await context.read<ServiceProvider>().loadServices();
     if (widget.packageId != null) {
       final pkg = await context.read<PackageProvider>().getPackage(widget.packageId!);
       if (pkg != null) {
@@ -127,26 +132,13 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
               onChanged: (v) => setState(() => _isActive = v),
             ),
             const Divider(height: 24),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text('Package Services',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                ),
-                TextButton.icon(
-                  onPressed: _addService,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Add Service'),
-                ),
-              ],
-            ),
-            if (_services.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('No services added yet.', style: TextStyle(color: AppColors.textHint)),
-              )
-            else
-              ..._services.asMap().entries.map((e) => _buildServiceRow(e.key, e.value)),
+            const Text('Package Services',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            const Text('Tap a service below to add it to this package.',
+              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+            const SizedBox(height: 12),
+            _buildServicePicker(),
             const SizedBox(height: 16),
             _buildSummary(),
           ],
@@ -188,63 +180,234 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
     );
   }
 
-  Widget _buildServiceRow(int index, PackageService s) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: Row(
+  Widget _buildServicePicker() {
+    return Consumer2<CategoryProvider, ServiceProvider>(
+      builder: (context, catProvider, svcProvider, _) {
+        final categories = catProvider.activeCategories;
+        final hasAnyService = svcProvider.allServices.any((s) => s.isActive);
+        if (categories.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('Please add a service category first from Settings.',
+              style: TextStyle(color: AppColors.textHint)),
+          );
+        }
+        if (!hasAnyService) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('No services available yet.', style: TextStyle(color: AppColors.textHint)),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildFavoritesSection(svcProvider),
+            for (final cat in categories) _buildCategorySection(cat, svcProvider),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildFavoritesSection(ServiceProvider svcProvider) {
+    final favorites = svcProvider.allServices
+        .where((s) => s.isActive && s.isFavorite)
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    if (favorites.isEmpty) return const SizedBox.shrink();
+
+    const sectionKey = '__favorites__';
+    final isCollapsed = _collapsedSections.contains(sectionKey);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.pathLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text('Normal: ${AppFormatters.formatCurrency(s.normalPrice)}',
-                  style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
-              ],
-            ),
+          _buildSectionHeader(
+            label: 'Favorites',
+            icon: Icons.star_rounded,
+            color: AppColors.warning,
+            background: AppColors.warningLight,
+            isCollapsed: isCollapsed,
+            onTap: () => _toggleSectionCollapsed(sectionKey),
           ),
-          SizedBox(
-            width: 90,
-            child: TextFormField(
-              initialValue: _formatNumber(s.packageServiceAmount),
-              decoration: const InputDecoration(labelText: 'Pkg amt', isDense: true),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-              onChanged: (v) {
-                final amount = double.tryParse(v) ?? 0;
-                setState(() {
-                  _services[index] = PackageService(
-                    id: s.id,
-                    packageId: s.packageId,
-                    serviceId: s.serviceId,
-                    categoryId: s.categoryId,
-                    serviceTypeId: s.serviceTypeId,
-                    categoryNameSnapshot: s.categoryNameSnapshot,
-                    serviceTypeNameSnapshot: s.serviceTypeNameSnapshot,
-                    serviceNameSnapshot: s.serviceNameSnapshot,
-                    normalPrice: s.normalPrice,
-                    packageServiceAmount: amount,
-                    quantity: s.quantity,
-                    createdDate: s.createdDate,
-                  );
-                });
-              },
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.error),
-            onPressed: () => setState(() => _services.removeAt(index)),
-          ),
+          if (!isCollapsed) ...[
+            const SizedBox(height: 8),
+            ...favorites.map(_buildServiceSelectRow),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildCategorySection(Category cat, ServiceProvider svcProvider) {
+    final services = svcProvider.allServices.where((s) => s.categoryId == cat.id && s.isActive).toList();
+    if (services.isEmpty) return const SizedBox.shrink();
+
+    final sectionKey = 'cat_${cat.id}';
+    final isCollapsed = _collapsedSections.contains(sectionKey);
+
+    // Group services by service type (null = directly under the category).
+    final Map<String?, List<Service>> byType = {};
+    final List<String?> typeOrder = [];
+    for (final s in services) {
+      final key = s.serviceTypeName;
+      if (!byType.containsKey(key)) {
+        byType[key] = [];
+        typeOrder.add(key);
+      }
+      byType[key]!.add(s);
+    }
+    for (final list in byType.values) {
+      list.sort((a, b) {
+        if (a.isFavorite != b.isFavorite) return a.isFavorite ? -1 : 1;
+        return 0;
+      });
+    }
+    // Show untyped services first, then each named service type.
+    typeOrder.sort((a, b) {
+      if (a == null) return -1;
+      if (b == null) return 1;
+      return a.compareTo(b);
+    });
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            label: cat.name,
+            icon: Icons.category_rounded,
+            color: AppColors.secondary,
+            background: AppColors.secondaryContainer,
+            isCollapsed: isCollapsed,
+            onTap: () => _toggleSectionCollapsed(sectionKey),
+          ),
+          if (!isCollapsed) ...[
+            const SizedBox(height: 8),
+            for (final typeName in typeOrder) ...[
+              if (typeName != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.account_tree_rounded,
+                          size: 13, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(typeName,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ...byType[typeName]!.map(_buildServiceSelectRow),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _toggleSectionCollapsed(String key) {
+    setState(() {
+      if (!_collapsedSections.add(key)) _collapsedSections.remove(key);
+    });
+  }
+
+  Widget _buildSectionHeader({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required Color background,
+    required bool isCollapsed,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+            const SizedBox(width: 6),
+            Icon(
+              isCollapsed ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+              size: 18,
+              color: color,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildServiceSelectRow(Service svc) {
+    final idx = _services.indexWhere((s) => s.serviceId == svc.id);
+    final isSelected = idx >= 0;
+    return _PackageServiceSelectRow(
+      key: ValueKey(svc.id),
+      service: svc,
+      packageServiceAmount: isSelected ? _services[idx].packageServiceAmount : svc.defaultPrice,
+      isSelected: isSelected,
+      onToggle: () => _toggleServiceSelection(svc),
+      onAmountChanged: (amount) => _updatePackageAmount(svc.id!, amount),
+    );
+  }
+
+  void _toggleServiceSelection(Service svc) {
+    setState(() {
+      final idx = _services.indexWhere((s) => s.serviceId == svc.id);
+      if (idx >= 0) {
+        _services.removeAt(idx);
+      } else {
+        _services.add(PackageService(
+          packageId: _existing?.id ?? 0,
+          serviceId: svc.id,
+          categoryId: svc.categoryId,
+          serviceTypeId: svc.serviceTypeId,
+          categoryNameSnapshot: svc.categoryName ?? '',
+          serviceTypeNameSnapshot: svc.serviceTypeName,
+          serviceNameSnapshot: svc.name,
+          normalPrice: svc.defaultPrice,
+          packageServiceAmount: svc.defaultPrice,
+        ));
+      }
+    });
+  }
+
+  void _updatePackageAmount(int serviceId, double amount) {
+    final idx = _services.indexWhere((s) => s.serviceId == serviceId);
+    if (idx < 0) return;
+    final s = _services[idx];
+    setState(() {
+      _services[idx] = PackageService(
+        id: s.id,
+        packageId: s.packageId,
+        serviceId: s.serviceId,
+        categoryId: s.categoryId,
+        serviceTypeId: s.serviceTypeId,
+        categoryNameSnapshot: s.categoryNameSnapshot,
+        serviceTypeNameSnapshot: s.serviceTypeNameSnapshot,
+        serviceNameSnapshot: s.serviceNameSnapshot,
+        normalPrice: s.normalPrice,
+        packageServiceAmount: amount,
+        quantity: s.quantity,
+        createdDate: s.createdDate,
+      );
+    });
   }
 
   Widget _buildSummary() {
@@ -261,146 +424,6 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
           _summaryRow('Package Price', _packagePrice),
           _summaryRow('Package Discount', _discount, color: AppColors.success),
         ],
-      ),
-    );
-  }
-
-  Widget _summaryRow(String label, double value, {Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary))),
-          Text(AppFormatters.formatCurrency(value),
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: color ?? AppColors.textPrimary)),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _addService() async {
-    final catProvider = context.read<CategoryProvider>();
-    final svcProvider = context.read<ServiceProvider>();
-    final cats = catProvider.activeCategories;
-    if (cats.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add a service category first')));
-      return;
-    }
-    int? selectedCategoryId = cats.first.id;
-    int? selectedTypeId;
-    Service? selectedService;
-    List<ServiceType> types = [];
-    List<Service> services = [];
-    int? loadedForCategoryId;
-    final amountCtrl = TextEditingController();
-
-    Future<void> reload(void Function(void Function()) setDialogState, int categoryId) async {
-      loadedForCategoryId = categoryId;
-      types = await catProvider.getServiceTypesForCategory(categoryId);
-      services = await svcProvider.getServicesForCategory(categoryId, onlyDirect: true);
-      setDialogState(() {});
-    }
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          if (selectedCategoryId != null && loadedForCategoryId != selectedCategoryId) {
-            reload(setDialogState, selectedCategoryId!);
-          }
-          return AlertDialog(
-            title: const Text('Add Service to Package'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<int>(
-                    initialValue: selectedCategoryId,
-                    decoration: const InputDecoration(labelText: 'Category'),
-                    items: cats.map((c) => DropdownMenuItem(value: c.id!, child: Text(c.name))).toList(),
-                    onChanged: (v) {
-                      selectedCategoryId = v;
-                      selectedTypeId = null;
-                      selectedService = null;
-                      types = [];
-                      services = [];
-                      if (v != null) reload(setDialogState, v);
-                      setDialogState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  if (types.isNotEmpty)
-                    DropdownButtonFormField<int?>(
-                      initialValue: selectedTypeId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Service Type'),
-                      items: [
-                        const DropdownMenuItem<int?>(value: null, child: Text('None')),
-                        ...types.map((t) => DropdownMenuItem<int?>(value: t.id, child: Text(t.name))),
-                      ],
-                      onChanged: (v) async {
-                        selectedTypeId = v;
-                        selectedService = null;
-                        services = await svcProvider.getServicesForCategory(
-                          selectedCategoryId!,
-                          serviceTypeId: v,
-                          onlyDirect: v == null,
-                        );
-                        setDialogState(() {});
-                      },
-                    ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<Service>(
-                    initialValue: selectedService,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Service *'),
-                    items: services
-                        .map((s) => DropdownMenuItem(value: s, child: Text('${s.name} (${AppFormatters.formatCurrency(s.defaultPrice)})')))
-                        .toList(),
-                    onChanged: (v) {
-                      selectedService = v;
-                      amountCtrl.text = v != null ? _formatNumber(v.defaultPrice) : '';
-                      setDialogState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: amountCtrl,
-                    decoration: const InputDecoration(labelText: 'Package Service Amount (₹) *', prefixText: '₹ '),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: () {
-                  final svc = selectedService;
-                  if (svc == null) return;
-                  final amount = double.tryParse(amountCtrl.text) ?? svc.defaultPrice;
-                  setState(() {
-                    _services.add(PackageService(
-                      packageId: _existing?.id ?? 0,
-                      serviceId: svc.id,
-                      categoryId: svc.categoryId,
-                      serviceTypeId: svc.serviceTypeId,
-                      categoryNameSnapshot: svc.categoryName ?? '',
-                      serviceTypeNameSnapshot: svc.serviceTypeName,
-                      serviceNameSnapshot: svc.name,
-                      normalPrice: svc.defaultPrice,
-                      packageServiceAmount: amount,
-                    ));
-                  });
-                  Navigator.pop(ctx);
-                },
-                child: const Text('Add'),
-              ),
-            ],
-          );
-        },
       ),
     );
   }
@@ -449,4 +472,129 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
 
   String _dateOnly(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+}
+
+/// Tap-to-select service row for the package builder, styled the same way
+/// as the New Visit "Add Services" picker: an unselected row shows the
+/// service's default price; tapping it adds the service to the package with
+/// an editable package amount field (defaulting to the service's normal
+/// price), and tapping again removes it.
+class _PackageServiceSelectRow extends StatefulWidget {
+  final Service service;
+  final double packageServiceAmount;
+  final bool isSelected;
+  final VoidCallback onToggle;
+  final ValueChanged<double> onAmountChanged;
+
+  const _PackageServiceSelectRow({
+    super.key,
+    required this.service,
+    required this.packageServiceAmount,
+    required this.isSelected,
+    required this.onToggle,
+    required this.onAmountChanged,
+  });
+
+  @override
+  State<_PackageServiceSelectRow> createState() => _PackageServiceSelectRowState();
+}
+
+class _PackageServiceSelectRowState extends State<_PackageServiceSelectRow> {
+  late TextEditingController _amountCtrl;
+
+  String _formatNumber(double value) =>
+      value == value.roundToDouble() ? value.toInt().toString() : value.toString();
+
+  @override
+  void initState() {
+    super.initState();
+    _amountCtrl = TextEditingController(
+        text: widget.isSelected
+            ? _formatNumber(widget.packageServiceAmount)
+            : _formatNumber(widget.service.defaultPrice));
+  }
+
+  @override
+  void didUpdateWidget(covariant _PackageServiceSelectRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.isSelected) {
+      _amountCtrl.text = _formatNumber(widget.service.defaultPrice);
+    }
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onToggle,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: widget.isSelected ? AppColors.primaryContainer : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: widget.isSelected ? AppColors.primary : AppColors.divider,
+            width: widget.isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: widget.isSelected ? AppColors.primary : Colors.transparent,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: widget.isSelected ? AppColors.primary : AppColors.textHint,
+                  width: 2,
+                ),
+              ),
+              child: widget.isSelected
+                  ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(widget.service.name,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: widget.isSelected ? FontWeight.w700 : FontWeight.normal,
+                  color: widget.isSelected ? AppColors.textPrimary : AppColors.textSecondary,
+                )),
+            ),
+            if (widget.isSelected) ...[
+              SizedBox(
+                width: 90,
+                height: 32,
+                child: TextField(
+                  controller: _amountCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                  textAlign: TextAlign.right,
+                  decoration: const InputDecoration(
+                    prefixText: '₹',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => widget.onAmountChanged(double.tryParse(v) ?? 0),
+                  onTap: () {},
+                ),
+              ),
+            ] else
+              Text(AppFormatters.formatCurrency(widget.service.defaultPrice),
+                style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
 }
