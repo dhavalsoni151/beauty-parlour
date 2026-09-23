@@ -410,6 +410,22 @@ class _PackageFormScreenState extends State<PackageFormScreen> {
     });
   }
 
+  Widget _summaryRow(String label, double amount, {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: color)),
+          Text(
+            AppFormatters.formatCurrency(amount),
+            style: TextStyle(fontWeight: FontWeight.bold, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSummary() {
     return Container(
       padding: const EdgeInsets.all(16),
