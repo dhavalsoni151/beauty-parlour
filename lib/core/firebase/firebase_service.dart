@@ -56,7 +56,6 @@ class FirebaseService {
     required String email,
     required String password,
   }) async {
-    await requireOnline();
     return auth.signInWithEmailAndPassword(
       email: email.trim(),
       password: password,

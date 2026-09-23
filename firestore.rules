@@ -41,7 +41,7 @@ service cloud.firestore {
       allow create, delete: if false;
 
       match /members/{uid} {
-        allow read: if memberOf(orgId) && (uid == request.auth.uid || ownerOrAdmin(orgId));
+        allow read: if signedIn() && (uid == request.auth.uid || ownerOrAdmin(orgId));
         allow create, update, delete: if ownerOrAdmin(orgId);
       }
 
