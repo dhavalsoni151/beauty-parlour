@@ -15,35 +15,16 @@ import 'core/providers/dashboard_provider.dart';
 import 'core/providers/package_provider.dart';
 import 'core/providers/reminder_provider.dart';
 import 'core/services/notification_service.dart';
-import 'core/firebase/firebase_service.dart';
-import 'core/providers/firebase_startup_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Never let Firebase initialization hang the process on the native
-  // launch splash: capture the failure and start the Flutter UI anyway so
-  // StartupGate can show a retryable error instead of a stuck screen.
-  String? firebaseInitError;
-  try {
-    await FirebaseService.instance
-        .initialize()
-        .timeout(const Duration(seconds: 15));
-  } catch (error) {
-    firebaseInitError = error.toString();
-  }
-
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(
-          create: (_) => FirebaseStartupProvider(
-            firebaseInitError: firebaseInitError,
-          ),
-        ),
         // App-wide providers live above the router exactly once, so neither
-        // the startup gate nor the splash screen ever rebuilds MaterialApp
-        // or runs without the providers it consumes.
+        // the splash screen nor the app shell ever rebuilds MaterialApp or
+        // runs without the providers it consumes.
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => AppLockProvider()),
         ChangeNotifierProvider(create: (_) => CustomerProvider()),
@@ -62,8 +43,8 @@ void main() async {
 }
 
 /// Gates the single [BeautyParlourApp] instance: local database +
-/// notifications initialize (once) only after Firebase startup is ready,
-/// and business data loads right after — without ever swapping MaterialApp.
+/// notifications initialize once, and business data loads right after —
+/// without ever swapping MaterialApp.
 class _StartupRoot extends StatefulWidget {
   const _StartupRoot();
 
@@ -92,12 +73,6 @@ class _StartupRootState extends State<_StartupRoot> {
 
   @override
   Widget build(BuildContext context) {
-    final startup = context.watch<FirebaseStartupProvider>();
-    if (!startup.isReady) {
-      // Firebase gate (login / access-denied / offline / error) renders
-      // inside the normal app shell; providers above are already present.
-      return const BeautyParlourApp();
-    }
     _localInitialization ??= _initializeLocal(context);
     return FutureBuilder<void>(
       future: _localInitialization,
