@@ -640,6 +640,19 @@ class FirestoreReminderRepository extends _BaseRepository {
     );
     return ((await doc.get()).data()?['id'] as num).toInt();
   }
+
+  Future<List<Reminder>> getForCustomer(int customerId) async {
+    final snap = await scope
+        .collection(FirestoreCollectionNames.reminders)
+        .where('customer_id', isEqualTo: customerId)
+        .get();
+    final reminders = snap.docs
+        .map(FirestoreModelCodec.withDocumentId)
+        .map(Reminder.fromMap)
+        .toList();
+    reminders.sort((a, b) => b.reminderDate.compareTo(a.reminderDate));
+    return reminders;
+  }
 }
 
 class FirestoreSettingsRepository extends _BaseRepository {
