@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/database/database.dart';
 import '../../core/models/appointment_models.dart';
 import '../../core/models/customer_models.dart';
 import '../../core/models/package_models.dart';
@@ -10,6 +9,7 @@ import '../../core/providers/appointment_provider.dart';
 import '../../core/providers/category_provider.dart';
 import '../../core/providers/customer_provider.dart';
 import '../../core/providers/package_provider.dart';
+import '../../core/providers/service_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../packages/package_picker_sheet.dart';
@@ -33,9 +33,6 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _notesController = TextEditingController();
 
-  final _serviceDao = ServiceDao();
-  final _categoryDao = CategoryDao();
-  final _serviceTypeDao = ServiceTypeDao();
 
   List<Customer> _customers = [];
   List<Category> _categories = [];
@@ -110,11 +107,8 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
         }
 
         if (appointment.categoryId != null) {
-          _selectedCategory = await _categoryDao.get(appointment.categoryId!);
-          if (_selectedCategory != null &&
-              !_categories.any((c) => c.id == _selectedCategory!.id)) {
-            _categories = [..._categories, _selectedCategory!];
-          }
+          _selectedCategory =
+              _categories.where((c) => c.id == appointment.categoryId).firstOrNull;
         }
 
         _notesController.text = appointment.notes ?? '';
@@ -182,8 +176,9 @@ class _AppointmentFormScreenState extends State<AppointmentFormScreen> {
     if (appointment.serviceId == null && appointment.serviceNameSnapshot.isEmpty) {
       return const [];
     }
-    final service =
-        appointment.serviceId != null ? await _serviceDao.get(appointment.serviceId!) : null;
+    final service = appointment.serviceId == null
+        ? null
+        : context.read<ServiceProvider>().allServices.where((s) => s.id == appointment.serviceId).firstOrNull;
     return [
       AppointmentService(
         appointmentId: appointment.id ?? 0,
@@ -1034,4 +1029,9 @@ class _AppointmentServiceEntry {
   });
 
   double get total => price * quantity;
+}
+
+
+extension _FirstOrNullService<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -8,9 +7,6 @@ import '../../core/providers/dashboard_provider.dart';
 import '../../core/providers/appointment_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/providers/visit_provider.dart';
-import '../../core/database/daos/settings_dao.dart';
-import '../../core/database/daos/reminder_dao.dart';
-import '../../core/database/migration_mapping.dart';
 import '../../core/models/reminder_models.dart';
 import '../../core/providers/reminder_provider.dart';
 import '../../core/utils/formatters.dart';
@@ -32,41 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DashboardProvider>().loadDashboard();
       context.read<AppointmentProvider>().loadUpcomingAppointments();
-      _checkMigrationReport();
     });
-  }
-
-  /// If a legacy-data migration ran on this launch, a report was stored under
-  /// the `pending_migration_report` settings key. Show it once, then clear it.
-  Future<void> _checkMigrationReport() async {
-    final dao = SettingsDao();
-    final raw = await dao.getSetting('pending_migration_report');
-    if (raw == null || raw.isEmpty) return;
-    await dao.deleteSetting('pending_migration_report');
-    if (!mounted) return;
-    MigrationReport report;
-    try {
-      report = MigrationReport.fromJson(
-          jsonDecode(raw) as Map<String, dynamic>);
-    } catch (_) {
-      return;
-    }
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Data Migration Complete'),
-        content: SingleChildScrollView(
-          child: Text(report.buildSummary(),
-              style: const TextStyle(fontSize: 13, height: 1.4)),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK')),
-        ],
-      ),
-    );
   }
 
   @override
@@ -725,9 +687,9 @@ class _PaymentMethodChart extends StatelessWidget {
 }
 
 
-/// Dashboard card for Customer Reminders. Uses the same ReminderDao query /
-/// business rules as the Reminders screen (no separate logic) to count due /
-/// eligible customers in a few "days since last visit" buckets.
+/// Dashboard card for Customer Reminders. Uses the same ReminderProvider
+/// candidate list as the Reminders screen to count due / eligible customers
+/// in a few "days since last visit" buckets.
 class _CustomerRemindersCard extends StatefulWidget {
   const _CustomerRemindersCard();
 
@@ -745,7 +707,8 @@ class _CustomerRemindersCardState extends State<_CustomerRemindersCard> {
   }
 
   Future<void> _load() async {
-    final counts = await ReminderDao().getDueCounts(const [25, 60, 90]);
+    final provider = context.read<ReminderProvider>();
+    final counts = await provider.getDueCounts(const [25, 60, 90]);
     if (mounted) setState(() => _counts = counts);
   }
 
@@ -837,8 +800,8 @@ class _MonthlyAnniversaryRemindersCardState
   }
 
   Future<void> _load() async {
-    var candidates = await ReminderDao().findMonthlyAnniversaryCandidates();
-    candidates = await ReminderDao().attachServices(candidates);
+    final provider = context.read<ReminderProvider>();
+    final candidates = await provider.findMonthlyAnniversaryCandidates();
     if (mounted) setState(() { _candidates = candidates; _loading = false; });
   }
 

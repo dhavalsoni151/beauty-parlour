@@ -1,27 +1,42 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
-import '../database/database.dart';
+
+import '../firebase/firebase_service.dart';
+import '../firestore/firestore_repositories.dart';
 import '../models/customer_models.dart';
+import 'firebase_startup_provider.dart';
 
 class CustomerProvider extends ChangeNotifier {
-  final _customerDao = CustomerDao();
-  final _reportDao = ReportDao();
+  final FirestoreCustomerRepository _repository = FirestoreCustomerRepository(
+    FirestoreScope(
+      firestore: FirebaseService.instance.firestore,
+      organizationId: firebaseOrganizationId,
+    ),
+  );
 
   List<Customer> _customers = [];
   List<Customer> _filteredCustomers = [];
   bool _isLoading = false;
   String _searchQuery = '';
+  bool _activeOnly = true;
+  StreamSubscription<List<Customer>>? _subscription;
 
   List<Customer> get customers => _filteredCustomers;
   List<Customer> get allCustomers => _customers;
   bool get isLoading => _isLoading;
 
   Future<void> loadCustomers({bool activeOnly = true}) async {
+    _activeOnly = activeOnly;
     _isLoading = true;
     notifyListeners();
-    _customers = await _customerDao.getAll(activeOnly: activeOnly);
-    _applyFilter();
-    _isLoading = false;
-    notifyListeners();
+    await _subscription?.cancel();
+    _subscription = _repository.watchAll(activeOnly: activeOnly).listen((items) {
+      _customers = items;
+      _applyFilter();
+      _isLoading = false;
+      notifyListeners();
+    });
   }
 
   void search(String query) {
@@ -33,45 +48,80 @@ class CustomerProvider extends ChangeNotifier {
   void _applyFilter() {
     if (_searchQuery.isEmpty) {
       _filteredCustomers = List.from(_customers);
-    } else {
-      final q = _searchQuery.toLowerCase();
-      _filteredCustomers = _customers
-          .where((c) =>
-              c.name.toLowerCase().contains(q) ||
-              (c.phone?.contains(q) ?? false))
-          .toList();
+      return;
     }
+    final q = _searchQuery.toLowerCase();
+    _filteredCustomers = _customers
+        .where((c) =>
+            c.name.toLowerCase().contains(q) ||
+            (c.phone?.toLowerCase().contains(q) ?? false))
+        .toList();
   }
 
-  Future<Customer?> getCustomer(int id) async {
-    return _customerDao.get(id);
-  }
+  Future<Customer?> getCustomer(int id) => _repository.get(id);
 
   Future<List<Customer>> searchCustomers(String query) async {
     if (query.isEmpty) return _customers;
-    return _customerDao.search(query);
+    final q = query.toLowerCase();
+    return _customers
+        .where((c) =>
+            c.name.toLowerCase().contains(q) ||
+            (c.phone?.toLowerCase().contains(q) ?? false))
+        .toList();
   }
 
-  Future<int> addCustomer(Customer customer) async {
-    final id = await _customerDao.insert(customer);
-    await loadCustomers();
-    return id;
-  }
+  Future<int> addCustomer(Customer customer) => _repository.save(customer);
 
-  Future<void> updateCustomer(Customer customer) async {
-    await _customerDao.update(customer);
-    await loadCustomers();
-  }
+  Future<void> updateCustomer(Customer customer) => _repository.save(customer);
 
   Future<void> deactivateCustomer(int id) async {
-    final customer = await _customerDao.get(id);
-    if (customer != null) {
-      await _customerDao.update(customer.copyWith(isActive: false));
-      await loadCustomers();
+    await _repository.deactivate(id);
+    if (!_activeOnly) {
+      await loadCustomers(activeOnly: false);
     }
   }
 
   Future<Map<String, dynamic>> getCustomerStats(int id) async {
-    return _reportDao.getCustomerStats(id);
+    final visitsSnapshot = await FirebaseService.instance.firestore
+        .collection('organizations')
+        .doc(firebaseOrganizationId)
+        .collection(FirestoreCollectionNames.visits)
+        .where('customer_id', isEqualTo: id)
+        .get();
+
+    double totalBilled = 0;
+    double totalPaid = 0;
+    double totalPending = 0;
+    String? firstVisit;
+    String? lastVisit;
+    for (final doc in visitsSnapshot.docs) {
+      final data = doc.data();
+      totalBilled += (data['final_total'] as num? ?? 0).toDouble();
+      totalPaid += (data['total_paid'] as num? ?? 0).toDouble();
+      totalPending += (data['pending_amount'] as num? ?? 0).toDouble();
+      final visitDate = data['visit_date'] as String?;
+      if (visitDate != null && (lastVisit == null || visitDate.compareTo(lastVisit) > 0)) {
+        lastVisit = visitDate;
+      }
+      if (visitDate != null && (firstVisit == null || visitDate.compareTo(firstVisit) < 0)) {
+        firstVisit = visitDate;
+      }
+    }
+
+    return {
+      'customer_id': id,
+      'total_visits': visitsSnapshot.docs.length,
+      'total_billed': totalBilled,
+      'total_paid': totalPaid,
+      'total_pending': totalPending,
+      'first_visit': firstVisit,
+      'last_visit': lastVisit,
+    };
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 }

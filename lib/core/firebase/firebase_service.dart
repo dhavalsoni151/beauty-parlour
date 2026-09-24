@@ -14,6 +14,11 @@ class FirebaseService {
   late final FirebaseFirestore firestore;
   final Connectivity connectivity = Connectivity();
 
+  static const Settings offlineSettings = Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+  );
+
   bool _initialized = false;
   bool get isInitialized => _initialized;
 
@@ -25,7 +30,7 @@ class FirebaseService {
     );
     auth = FirebaseAuth.instance;
     firestore = FirebaseFirestore.instance;
-    firestore.settings = const Settings(persistenceEnabled: false);
+    firestore.settings = offlineSettings;
     await FirebaseAppCheck.instance.activate(
       providerAndroid: kDebugMode
           ? const AndroidDebugProvider()

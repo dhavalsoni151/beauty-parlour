@@ -1,53 +1,31 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:beauty_parlour/core/firestore/firestore_repositories.dart';
-import 'package:beauty_parlour/core/models/visit_models.dart';
 
 void main() {
-  test('legacy ids become deterministic Firestore document ids', () {
-    expect(FirestoreModelCodec.documentId(legacyId: 42), '42');
-    expect(FirestoreModelCodec.documentId(legacyId: 0), '0');
+  test('generated numeric ids are positive and unique across calls', () {
+    final a = FirestoreModelCodec.numericId();
+    final b = FirestoreModelCodec.numericId();
+    expect(a, greaterThan(0));
+    expect(b, greaterThan(0));
+    expect(a == b, isFalse);
   });
 
-  test('master records carry migration metadata without changing fields', () {
-    final fields = <String, dynamic>{
-      'id': 7,
-      'name': 'Full Hands',
-      'default_price': 170.0,
-    };
 
-    final record = FirestoreModelCodec.record(fields, legacyId: 7);
-
-    expect(record['legacy_id'], 7);
-    expect(record['record_type'], 'master_data');
-    expect(record['schema_version'], FirestoreModelCodec.schemaVersion);
-    expect(record['name'], 'Full Hands');
-    expect(record['default_price'], 170.0);
+  test('numeric id generator produces unique values across burst sample', () {
+    final values = <int>{};
+    for (var i = 0; i < 5000; i++) {
+      values.add(FirestoreModelCodec.numericId());
+    }
+    expect(values.length, 5000);
   });
 
-  test('historical records are marked without rewriting snapshots', () {
-    const service = VisitService(
-      visitId: 12,
-      serviceId: 3,
-      categoryId: 1,
-      serviceTypeId: 2,
-      categoryNameSnapshot: 'Wax',
-      serviceTypeNameSnapshot: 'Rica Wax',
-      serviceNameSnapshot: 'Full Hands',
-      price: 250,
-      total: 250,
-    );
-
-    final record = FirestoreModelCodec.historical(
-      service.toMap(),
-      legacyId: 19,
-    );
-
-    expect(record['record_type'], 'historical_transaction');
-    expect(record['legacy_id'], 19);
-    expect(record['category_name_snapshot'], 'Wax');
-    expect(record['service_type_name_snapshot'], 'Rica Wax');
-    expect(record['service_name_snapshot'], 'Full Hands');
-    expect(record['price'], 250);
+  test('document-id derivation is deterministic', () {
+    final first = FirestoreModelCodec.deriveIdFromDocumentId('abc123');
+    final second = FirestoreModelCodec.deriveIdFromDocumentId('abc123');
+    final third = FirestoreModelCodec.deriveIdFromDocumentId('xyz789');
+    expect(first, equals(second));
+    expect(first, isNot(equals(third)));
+    expect(first, greaterThan(0));
   });
 
   test('organization scope rejects an empty organization id', () {
