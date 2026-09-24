@@ -1,7 +1,5 @@
-import 'dart:async';
-import 'dart:math';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/appointment_models.dart';
 import '../models/customer_models.dart';
@@ -9,13 +7,18 @@ import '../models/package_models.dart';
 import '../models/reminder_models.dart';
 import '../models/visit_models.dart';
 
+/// All Firestore access is rooted below one organization document. Repositories
+/// must be constructed with the authenticated organization's id and never use
+/// root-level business collections.
 class FirestoreScope {
-  FirestoreScope({required this.firestore, required this.organizationId}) {
+  FirestoreScope({required this._firestore, required this.organizationId}) {
     validateOrganizationId(organizationId);
   }
 
-  final FirebaseFirestore firestore;
+  final FirebaseFirestore _firestore;
   final String organizationId;
+
+  FirebaseFirestore get firestore => _firestore;
 
   static void validateOrganizationId(String value) {
     if (value.trim().isEmpty) {
@@ -24,10 +27,16 @@ class FirestoreScope {
   }
 
   DocumentReference<Map<String, dynamic>> get organization =>
-      firestore.collection('organizations').doc(organizationId);
+      _firestore.collection('organizations').doc(organizationId);
 
   CollectionReference<Map<String, dynamic>> collection(String name) =>
       organization.collection(name);
+
+  CollectionReference<Map<String, dynamic>> childCollection(
+    String parentCollection,
+    String parentId,
+    String childCollection,
+  ) => collection(parentCollection).doc(parentId).collection(childCollection);
 }
 
 class FirestoreCollectionNames {
@@ -44,249 +53,265 @@ class FirestoreCollectionNames {
   static const reminders = 'reminders';
 }
 
+/// Converts existing SQLite-shaped model maps into migration-friendly
+/// Firestore records without changing business field names or snapshots.
 class FirestoreModelCodec {
-  static const int schemaVersion = 2;
-  static final Random _random = Random();
+  static const int schemaVersion = 1;
+  static const Uuid _uuid = Uuid();
 
-  static int deriveIdFromDocumentId(String docId) {
-    var hash = 0;
-    for (final unit in docId.codeUnits) {
-      hash = ((hash * 31) + unit) & 0x7fffffff;
-    }
-    return hash == 0 ? 1 : hash;
-  }
+  static String documentId({int? legacyId}) =>
+      legacyId?.toString() ?? _uuid.v4();
 
-  static int numericId() {
-    final ts = DateTime.now().microsecondsSinceEpoch;
-    return ts * 1000 + _random.nextInt(1000);
+  static Map<String, dynamic> record(
+    Map<String, dynamic> fields, {
+    int? legacyId,
+    bool historical = false,
+  }) {
+    return {
+      ...fields,
+      'schema_version': schemaVersion,
+      if (legacyId != null) 'legacy_id': legacyId,
+      'record_type': historical ? 'historical_transaction' : 'master_data',
+    };
   }
 
   static Map<String, dynamic> withDocumentId(
     DocumentSnapshot<Map<String, dynamic>> snapshot,
   ) {
     final data = Map<String, dynamic>.from(snapshot.data() ?? const {});
-    data['firestore_id'] = snapshot.id;
-    data['id'] ??= deriveIdFromDocumentId(snapshot.id);
+    final legacyId = data['legacy_id'];
+    data['id'] ??= legacyId is num
+        ? legacyId.toInt()
+        : int.tryParse(snapshot.id);
     return data;
   }
+
+  static Map<String, dynamic> historical(
+    Map<String, dynamic> fields, {
+    int? legacyId,
+  }) => record(fields, legacyId: legacyId, historical: true);
 }
 
-abstract class _BaseRepository {
-  _BaseRepository(this.scope);
+abstract class _FirestoreRepository {
+  _FirestoreRepository(this.scope);
 
   final FirestoreScope scope;
 
-  Future<DocumentReference<Map<String, dynamic>>> upsert({
+  Future<DocumentReference<Map<String, dynamic>>> saveMap({
     required String collection,
     required Map<String, dynamic> fields,
-    int? id,
+    int? legacyId,
+    bool historical = false,
+    String? documentId,
   }) async {
-    final payload = Map<String, dynamic>.from(fields);
-    payload['schema_version'] = FirestoreModelCodec.schemaVersion;
-    int numeric = id ?? (payload['id'] as int?) ?? FirestoreModelCodec.numericId();
-    if (id == null && payload['id'] == null) {
-      while (await _findDocIdByNumericId(collection, numeric) != null) {
-        numeric = FirestoreModelCodec.numericId();
-      }
-    }
-    payload['id'] = numeric;
-
-    final existingDocId = await _findDocIdByNumericId(collection, numeric);
-    final docId = existingDocId ?? 'id_$numeric';
-    final doc = scope.collection(collection).doc(docId);
-    payload['firestore_id'] = doc.id;
-    await doc.set(payload, SetOptions(merge: true));
-    return doc;
+    final id = documentId ?? FirestoreModelCodec.documentId(legacyId: legacyId);
+    final reference = scope.collection(collection).doc(id);
+    await reference.set(
+      FirestoreModelCodec.record(
+        fields,
+        legacyId: legacyId,
+        historical: historical,
+      ),
+    );
+    return reference;
   }
 
-  Stream<List<Map<String, dynamic>>> streamCollection(
-    String collection, {
+  Future<Map<String, dynamic>?> getMap({
+    required String collection,
+    required String documentId,
+  }) async {
+    final snapshot = await scope
+        .collection(collection)
+        .doc(documentId)
+        .get(const GetOptions(source: Source.server));
+    return snapshot.exists
+        ? FirestoreModelCodec.withDocumentId(snapshot)
+        : null;
+  }
+
+  Future<List<Map<String, dynamic>>> listMaps({
+    required String collection,
+    bool? activeOnly,
     String? orderBy,
-    bool descending = false,
-    Map<String, dynamic>? where,
-  }) {
+  }) async {
     Query<Map<String, dynamic>> query = scope.collection(collection);
-    if (where != null) {
-      where.forEach((key, value) {
-        query = query.where(key, isEqualTo: value);
-      });
+    if (activeOnly != null) {
+      query = query.where('is_active', isEqualTo: activeOnly ? 1 : 0);
     }
     if (orderBy != null) {
-      query = query.orderBy(orderBy, descending: descending);
+      query = query.orderBy(orderBy);
     }
-    return query.snapshots().map(
-          (s) => s.docs.map(FirestoreModelCodec.withDocumentId).toList(),
-        );
-  }
-
-  Future<String?> _findDocIdByNumericId(String collection, int id) async {
-    final q = await scope
-        .collection(collection)
-        .where('id', isEqualTo: id)
-        .limit(1)
-        .get();
-    if (q.docs.isEmpty) return null;
-    return q.docs.first.id;
-  }
-
-  Future<Map<String, dynamic>?> getByNumericId(String collection, int id) async {
-    final q = await scope
-        .collection(collection)
-        .where('id', isEqualTo: id)
-        .limit(1)
-        .get();
-    if (q.docs.isEmpty) return null;
-    return FirestoreModelCodec.withDocumentId(q.docs.first);
-  }
-
-  Future<void> deleteByNumericId(String collection, int id) async {
-    final docId = await _findDocIdByNumericId(collection, id);
-    if (docId == null) return;
-    await scope.collection(collection).doc(docId).delete();
-  }
-
-  Future<DocumentReference<Map<String, dynamic>>> docByNumericId(
-    String collection,
-    int id,
-  ) async {
-    final docId = await _findDocIdByNumericId(collection, id);
-    if (docId == null) {
-      throw StateError('Document not found for $collection id=$id');
-    }
-    return scope.collection(collection).doc(docId);
+    final result = await query.get(const GetOptions(source: Source.server));
+    return result.docs.map(FirestoreModelCodec.withDocumentId).toList();
   }
 }
 
-class FirestoreCustomerRepository extends _BaseRepository {
+class FirestoreCustomerRepository extends _FirestoreRepository {
   FirestoreCustomerRepository(super.scope);
 
-  Stream<List<Customer>> watchAll({bool activeOnly = true}) {
-    return streamCollection(
-      FirestoreCollectionNames.customers,
+  Future<List<Customer>> getAll({bool activeOnly = true}) async {
+    final rows = await listMaps(
+      collection: FirestoreCollectionNames.customers,
+      activeOnly: activeOnly ? true : null,
       orderBy: 'name',
-      where: activeOnly ? {'is_active': 1} : null,
-    ).map((rows) => rows.map(Customer.fromMap).toList());
+    );
+    return rows.map(Customer.fromMap).toList();
   }
 
-  Future<Customer?> get(int id) async {
-    final row = await getByNumericId(FirestoreCollectionNames.customers, id);
+  Future<Customer?> get(String documentId) async {
+    final row = await getMap(
+      collection: FirestoreCollectionNames.customers,
+      documentId: documentId,
+    );
     return row == null ? null : Customer.fromMap(row);
   }
 
-  Future<int> save(Customer customer) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.customers,
-      fields: customer.toMap(),
-      id: customer.id,
-    );
-    final snapshot = await doc.get();
-    return (snapshot.data()?['id'] as num).toInt();
-  }
-
-  Future<void> deactivate(int id) async {
-    final doc = await docByNumericId(FirestoreCollectionNames.customers, id);
-    await doc.update({'is_active': 0, 'updated_date': DateTime.now().toIso8601String()});
-  }
+  Future<DocumentReference<Map<String, dynamic>>> save(Customer customer) =>
+      saveMap(
+        collection: FirestoreCollectionNames.customers,
+        fields: customer.toMap(),
+        legacyId: customer.id,
+      );
 }
 
-class FirestoreCatalogRepository extends _BaseRepository {
+class FirestoreCatalogRepository extends _FirestoreRepository {
   FirestoreCatalogRepository(super.scope);
 
-  Stream<List<Category>> watchCategories() =>
-      streamCollection(FirestoreCollectionNames.categories, orderBy: 'display_order')
-          .map((rows) => rows.map(Category.fromMap).toList());
-
-  Stream<List<ServiceType>> watchServiceTypes() =>
-      streamCollection(FirestoreCollectionNames.serviceTypes, orderBy: 'display_order')
-          .map((rows) => rows.map(ServiceType.fromMap).toList());
-
-  Stream<List<Service>> watchServices() =>
-      streamCollection(FirestoreCollectionNames.services, orderBy: 'name')
-          .map((rows) => rows.map(Service.fromMap).toList());
-
-  Future<int> saveCategory(Category value) async {
-    final doc = await upsert(
+  Future<List<Category>> getCategories({bool activeOnly = false}) async {
+    final rows = await listMaps(
       collection: FirestoreCollectionNames.categories,
-      fields: value.toMap(),
-      id: value.id,
+      activeOnly: activeOnly ? true : null,
+      orderBy: 'display_order',
     );
-    return ((await doc.get()).data()?['id'] as num).toInt();
+    return rows.map(Category.fromMap).toList();
   }
 
-  Future<int> saveServiceType(ServiceType value) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.serviceTypes,
-      fields: value.toMap(),
-      id: value.id,
+  Future<List<ServiceType>> getServiceTypes({
+    int? categoryId,
+    bool activeOnly = false,
+  }) async {
+    final rows = await _queryCatalog(
+      FirestoreCollectionNames.serviceTypes,
+      categoryId: categoryId,
+      activeOnly: activeOnly,
     );
-    return ((await doc.get()).data()?['id'] as num).toInt();
+    return rows.map(ServiceType.fromMap).toList();
   }
 
-  Future<int> saveService(Service value) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.services,
-      fields: value.toMap(),
-      id: value.id,
+  Future<List<Service>> getServices({
+    int? categoryId,
+    int? serviceTypeId,
+    bool onlyDirect = false,
+    bool activeOnly = true,
+  }) async {
+    Query<Map<String, dynamic>> query = scope.collection(
+      FirestoreCollectionNames.services,
     );
-    return ((await doc.get()).data()?['id'] as num).toInt();
-  }
-
-  Future<void> deleteCategory(int id) => deleteByNumericId(FirestoreCollectionNames.categories, id);
-  Future<void> deleteServiceType(int id) => deleteByNumericId(FirestoreCollectionNames.serviceTypes, id);
-  Future<void> deleteService(int id) => deleteByNumericId(FirestoreCollectionNames.services, id);
-
-  Future<bool> categoryNameExists(String name, {int? excludeId}) async {
-    final q = await scope
-        .collection(FirestoreCollectionNames.categories)
-        .where('name', isEqualTo: name)
-        .where('is_active', isEqualTo: 1)
-        .get();
-    return q.docs.any((d) => (d.data()['id'] as int?) != excludeId);
-  }
-
-  Future<bool> serviceTypeNameExists(int categoryId, String name,
-      {int? excludeId}) async {
-    final q = await scope
-        .collection(FirestoreCollectionNames.serviceTypes)
-        .where('category_id', isEqualTo: categoryId)
-        .where('name', isEqualTo: name)
-        .get();
-    return q.docs.any((d) => (d.data()['id'] as int?) != excludeId);
-  }
-
-  Future<bool> serviceNameExists(int categoryId, int? serviceTypeId, String name,
-      {int? excludeId}) async {
-    Query<Map<String, dynamic>> q = scope
-        .collection(FirestoreCollectionNames.services)
-        .where('category_id', isEqualTo: categoryId)
-        .where('name', isEqualTo: name);
-    if (serviceTypeId == null) {
-      q = q.where('service_type_id', isNull: true);
-    } else {
-      q = q.where('service_type_id', isEqualTo: serviceTypeId);
+    if (activeOnly) {
+      query = query.where('is_active', isEqualTo: 1);
     }
-    final result = await q.get();
-    return result.docs.any((d) => (d.data()['id'] as int?) != excludeId);
+    if (categoryId != null) {
+      query = query.where('category_id', isEqualTo: categoryId);
+    }
+    if (serviceTypeId != null) {
+      query = query.where('service_type_id', isEqualTo: serviceTypeId);
+    } else if (onlyDirect) {
+      query = query.where('service_type_id', isNull: true);
+    }
+    final result = await query.get(const GetOptions(source: Source.server));
+    final rows = result.docs.map(FirestoreModelCodec.withDocumentId).toList();
+    rows.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    return rows.map(Service.fromMap).toList();
+  }
+
+  Future<DocumentReference<Map<String, dynamic>>> saveCategory(
+    Category value,
+  ) => saveMap(
+    collection: FirestoreCollectionNames.categories,
+    fields: value.toMap(),
+    legacyId: value.id,
+  );
+
+  Future<DocumentReference<Map<String, dynamic>>> saveServiceType(
+    ServiceType value,
+  ) => saveMap(
+    collection: FirestoreCollectionNames.serviceTypes,
+    fields: value.toMap(),
+    legacyId: value.id,
+  );
+
+  Future<DocumentReference<Map<String, dynamic>>> saveService(Service value) =>
+      saveMap(
+        collection: FirestoreCollectionNames.services,
+        fields: value.toMap(),
+        legacyId: value.id,
+      );
+
+  Future<List<Map<String, dynamic>>> _queryCatalog(
+    String collection, {
+    int? categoryId,
+    bool activeOnly = false,
+  }) async {
+    Query<Map<String, dynamic>> query = scope.collection(collection);
+    if (categoryId != null) {
+      query = query.where('category_id', isEqualTo: categoryId);
+    }
+    if (activeOnly) {
+      query = query.where('is_active', isEqualTo: 1);
+    }
+    final result = await query.get(const GetOptions(source: Source.server));
+    return result.docs.map(FirestoreModelCodec.withDocumentId).toList();
   }
 }
 
-class FirestoreVisitRepository extends _BaseRepository {
+class FirestoreVisitRepository extends _FirestoreRepository {
   FirestoreVisitRepository(super.scope);
 
-  Stream<List<Visit>> watchVisits() {
-    return streamCollection(
-      FirestoreCollectionNames.visits,
-      orderBy: 'visit_date',
-      descending: true,
-    ).map((rows) => rows.map(Visit.fromMap).toList());
+  Future<Visit?> get(String documentId) async {
+    final row = await getMap(
+      collection: FirestoreCollectionNames.visits,
+      documentId: documentId,
+    );
+    if (row == null) return null;
+    final visit = Visit.fromMap(row);
+    final visitReference = scope
+        .collection(FirestoreCollectionNames.visits)
+        .doc(documentId);
+    final itemSnapshot = await visitReference
+        .collection('items')
+        .get(const GetOptions(source: Source.server));
+    final paymentSnapshot = await visitReference
+        .collection('payments')
+        .get(const GetOptions(source: Source.server));
+    visit.services = itemSnapshot.docs
+        .map(FirestoreModelCodec.withDocumentId)
+        .map(VisitService.fromMap)
+        .toList();
+    visit.payments = paymentSnapshot.docs
+        .map(FirestoreModelCodec.withDocumentId)
+        .map(Payment.fromMap)
+        .toList();
+    final customer = await getMap(
+      collection: FirestoreCollectionNames.customers,
+      documentId: visit.customerId.toString(),
+    );
+    if (customer != null) {
+      visit.customerName = customer['name'] as String?;
+      visit.customerPhone = customer['phone'] as String?;
+    }
+    return visit;
   }
 
-  Future<List<Visit>> listVisits({
+  Future<List<Visit>> getVisits({
     int? customerId,
     String? startDate,
     String? endDate,
+    String? paymentStatus,
+    List<String>? paymentStatuses,
   }) async {
-    Query<Map<String, dynamic>> query = scope.collection(FirestoreCollectionNames.visits);
+    Query<Map<String, dynamic>> query = scope.collection(
+      FirestoreCollectionNames.visits,
+    );
     if (customerId != null) {
       query = query.where('customer_id', isEqualTo: customerId);
     }
@@ -296,366 +321,175 @@ class FirestoreVisitRepository extends _BaseRepository {
     if (endDate != null) {
       query = query.where('visit_date', isLessThan: endDate);
     }
+    if (paymentStatus != null) {
+      query = query.where('payment_status', isEqualTo: paymentStatus);
+    } else if (paymentStatuses != null && paymentStatuses.isNotEmpty) {
+      query = query.where('payment_status', whereIn: paymentStatuses);
+    }
     query = query.orderBy('visit_date', descending: true);
-    final snap = await query.get();
-    return snap.docs.map(FirestoreModelCodec.withDocumentId).map(Visit.fromMap).toList();
+    final snapshot = await query.get(const GetOptions(source: Source.server));
+    final visits = <Visit>[];
+    for (final document in snapshot.docs) {
+      final visit = await get(document.id);
+      if (visit != null) visits.add(visit);
+    }
+    return visits;
   }
 
-  Stream<List<Visit>> watchPendingVisits() {
-    return watchVisits().map(
-      (visits) => visits
-          .where(
-            (v) => v.paymentStatus == PaymentStatus.pending ||
-                v.paymentStatus == PaymentStatus.partiallyPaid,
-          )
-          .toList(),
-    );
+  Future<List<Visit>> getPendingVisits() =>
+      getVisits(paymentStatuses: const ['PENDING', 'PARTIALLY_PAID']);
+
+  Future<void> updatePayment({
+    required String documentId,
+    required double totalPaid,
+    required double pendingAmount,
+    required String paymentStatus,
+  }) async {
+    await scope
+        .collection(FirestoreCollectionNames.visits)
+        .doc(documentId)
+        .update({
+          'total_paid': totalPaid,
+          'pending_amount': pendingAmount,
+          'payment_status': paymentStatus,
+          'updated_date': DateTime.now().toIso8601String(),
+        });
   }
 
-  Future<Visit?> get(int id) async {
-    final row = await getByNumericId(FirestoreCollectionNames.visits, id);
-    if (row == null) return null;
-    final visit = Visit.fromMap(row);
-    final visitDocId = row['firestore_id'] as String;
-    final doc = scope.collection(FirestoreCollectionNames.visits).doc(visitDocId);
-
-    final itemSnap = await doc.collection('items').get();
-    visit.services = itemSnap.docs
-        .map((d) => FirestoreModelCodec.withDocumentId(d))
-        .map(VisitService.fromMap)
-        .toList();
-
-    final paymentSnap = await doc.collection('payments').get();
-    visit.payments = paymentSnap.docs
-        .map((d) => FirestoreModelCodec.withDocumentId(d))
-        .map(Payment.fromMap)
-        .toList();
-
-    final customer = await getByNumericId(FirestoreCollectionNames.customers, visit.customerId);
-    visit.customerName = customer?['name'] as String?;
-    visit.customerPhone = customer?['phone'] as String?;
-    return visit;
-  }
-
-  Future<int> save(
-    Visit visit,
-    List<VisitService> services,
-    List<Payment> payments,
-  ) async {
-    final visitRef = await upsert(
-      collection: FirestoreCollectionNames.visits,
-      fields: visit.toMap(),
-      id: visit.id,
-    );
-    final saved = await visitRef.get();
-    final visitId = (saved.data()?['id'] as num).toInt();
-
-    final oldItems = await visitRef.collection('items').get();
-    final oldPayments = await visitRef.collection('payments').get();
+  Future<void> save({
+    required String documentId,
+    required Visit visit,
+    required List<VisitService> services,
+    required List<Payment> payments,
+    List<WriteOff> writeOffs = const [],
+  }) async {
     final batch = scope.firestore.batch();
-    for (final d in oldItems.docs) {
-      batch.delete(d.reference);
-    }
-    for (final d in oldPayments.docs) {
-      batch.delete(d.reference);
-    }
+    final visitReference = scope
+        .collection(FirestoreCollectionNames.visits)
+        .doc(documentId);
+    batch.set(
+      visitReference,
+      FirestoreModelCodec.historical(visit.toMap(), legacyId: visit.id),
+    );
     for (final service in services) {
-      final ref = visitRef.collection('items').doc();
-      final map = service.toMap();
-      map['id'] ??= FirestoreModelCodec.numericId();
-      map['visit_id'] = visitId;
-      batch.set(ref, map);
+      final childId = FirestoreModelCodec.documentId(legacyId: service.id);
+      batch.set(
+        visitReference.collection('items').doc(childId),
+        FirestoreModelCodec.historical(service.toMap(), legacyId: service.id),
+      );
     }
     for (final payment in payments) {
-      final ref = visitRef.collection('payments').doc();
-      final map = payment.toMap();
-      map['id'] ??= FirestoreModelCodec.numericId();
-      map['visit_id'] = visitId;
-      batch.set(ref, map);
+      final childId = FirestoreModelCodec.documentId(legacyId: payment.id);
+      batch.set(
+        visitReference.collection('payments').doc(childId),
+        FirestoreModelCodec.historical(payment.toMap(), legacyId: payment.id),
+      );
+    }
+    for (final writeOff in writeOffs) {
+      final childId = FirestoreModelCodec.documentId(legacyId: writeOff.id);
+      batch.set(
+        visitReference.collection('writeOffs').doc(childId),
+        FirestoreModelCodec.historical(writeOff.toMap(), legacyId: writeOff.id),
+      );
     }
     await batch.commit();
-    return visitId;
-  }
-
-  Future<void> updateVisit(Visit visit, List<VisitService> services) async {
-    final doc = await docByNumericId(FirestoreCollectionNames.visits, visit.id!);
-    await doc.set(visit.toMap(), SetOptions(merge: true));
-
-    final oldItems = await doc.collection('items').get();
-    final batch = scope.firestore.batch();
-    for (final item in oldItems.docs) {
-      batch.delete(item.reference);
-    }
-    for (final service in services) {
-      final ref = doc.collection('items').doc();
-      final map = service.toMap();
-      map['id'] ??= FirestoreModelCodec.numericId();
-      map['visit_id'] = visit.id;
-      batch.set(ref, map);
-    }
-    await batch.commit();
-  }
-
-  Future<void> recordPayment(int visitId, Payment payment, double totalPaid,
-      double pendingAmount, PaymentStatus paymentStatus) async {
-    final doc = await docByNumericId(FirestoreCollectionNames.visits, visitId);
-    final paymentRef = doc.collection('payments').doc();
-    final payload = payment.toMap();
-    payload['id'] ??= FirestoreModelCodec.numericId();
-    payload['visit_id'] = visitId;
-    await paymentRef.set(payload);
-    await doc.update({
-      'total_paid': totalPaid,
-      'pending_amount': pendingAmount,
-      'payment_status': paymentStatus.dbValue,
-      'updated_date': DateTime.now().toIso8601String(),
-    });
-  }
-
-  Future<void> writeOff(int visitId, WriteOff writeOff, {double pendingAmount = 0}) async {
-    final doc = await docByNumericId(FirestoreCollectionNames.visits, visitId);
-    final ref = doc.collection('writeOffs').doc();
-    final payload = writeOff.toMap();
-    payload['id'] ??= FirestoreModelCodec.numericId();
-    payload['visit_id'] = visitId;
-    await ref.set(payload);
-    await doc.update({
-      'pending_amount': pendingAmount,
-      'payment_status': PaymentStatus.writtenOff.dbValue,
-      'updated_date': DateTime.now().toIso8601String(),
-    });
   }
 }
 
-class FirestoreAppointmentRepository extends _BaseRepository {
+class FirestoreAppointmentRepository extends _FirestoreRepository {
   FirestoreAppointmentRepository(super.scope);
 
-  Stream<List<Appointment>> watchAppointments() {
-    return streamCollection(
-      FirestoreCollectionNames.appointments,
-      orderBy: 'appointment_date',
-      descending: true,
-    ).asyncMap((rows) async {
-      final list = <Appointment>[];
-      for (final row in rows) {
-        final appointment = Appointment.fromMap(row);
-        final doc = scope
-            .collection(FirestoreCollectionNames.appointments)
-            .doc(row['firestore_id'] as String);
-        final services = await doc.collection('items').get();
-        appointment.services = services.docs
-            .map(FirestoreModelCodec.withDocumentId)
-            .map(AppointmentService.fromMap)
-            .toList();
-        list.add(appointment);
-      }
-      return list;
-    });
-  }
-
-  Future<List<Appointment>> getUpcoming({int limit = 5}) async {
-    final today = DateTime.now();
-    final dateKey = '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-    final snap = await scope
+  Future<void> save(Appointment appointment) async {
+    final documentId = FirestoreModelCodec.documentId(legacyId: appointment.id);
+    final reference = scope
         .collection(FirestoreCollectionNames.appointments)
-        .where('status', isEqualTo: AppointmentStatus.pending.dbValue)
-        .where('appointment_date', isGreaterThanOrEqualTo: dateKey)
-        .orderBy('appointment_date')
-        .limit(limit * 3)
-        .get();
-    final items = snap.docs
-        .map(FirestoreModelCodec.withDocumentId)
-        .map(Appointment.fromMap)
-        .toList();
-    return items.take(limit).toList();
-  }
-
-  Future<bool> isSlotTaken(DateTime date, String startTime, {int? excludeId}) async {
-    final day = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    final snap = await scope
-        .collection(FirestoreCollectionNames.appointments)
-        .where('appointment_date', isEqualTo: day)
-        .where('start_time', isEqualTo: startTime)
-        .where('status', isEqualTo: AppointmentStatus.pending.dbValue)
-        .get();
-    return snap.docs.any((doc) => (doc.data()['id'] as int?) != excludeId);
-  }
-
-  Future<List<Appointment>> getForCustomer(int customerId) async {
-    final snap = await scope
-        .collection(FirestoreCollectionNames.appointments)
-        .where('customer_id', isEqualTo: customerId)
-        .orderBy('appointment_date', descending: true)
-        .get();
-    final list = <Appointment>[];
-    for (final d in snap.docs) {
-      final row = FirestoreModelCodec.withDocumentId(d);
-      final appointment = Appointment.fromMap(row);
-      final services = await d.reference.collection('items').get();
-      appointment.services = services.docs
-          .map(FirestoreModelCodec.withDocumentId)
-          .map(AppointmentService.fromMap)
-          .toList();
-      list.add(appointment);
-    }
-    return list;
-  }
-
-  Future<Appointment?> get(int id) async {
-    final row = await getByNumericId(FirestoreCollectionNames.appointments, id);
-    if (row == null) return null;
-    final a = Appointment.fromMap(row);
-    final doc = scope
-        .collection(FirestoreCollectionNames.appointments)
-        .doc(row['firestore_id'] as String);
-    final items = await doc.collection('items').get();
-    a.services = items.docs
-        .map(FirestoreModelCodec.withDocumentId)
-        .map(AppointmentService.fromMap)
-        .toList();
-    return a;
-  }
-
-  Future<int> save(Appointment appointment) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.appointments,
-      fields: appointment.toMap(),
-      id: appointment.id,
-    );
-    final snap = await doc.get();
-    final id = (snap.data()?['id'] as num).toInt();
-    final oldItems = await doc.collection('items').get();
+        .doc(documentId);
     final batch = scope.firestore.batch();
-    for (final d in oldItems.docs) {
-      batch.delete(d.reference);
-    }
+    batch.set(
+      reference,
+      FirestoreModelCodec.record(
+        appointment.toMap(),
+        legacyId: appointment.id,
+        historical: appointment.status == AppointmentStatus.completed,
+      ),
+    );
     for (final service in appointment.services) {
-      final ref = doc.collection('items').doc();
-      final payload = service.toMap();
-      payload['id'] ??= FirestoreModelCodec.numericId();
-      payload['appointment_id'] = id;
-      batch.set(ref, payload);
+      final childId = FirestoreModelCodec.documentId(legacyId: service.id);
+      batch.set(
+        reference.collection('items').doc(childId),
+        FirestoreModelCodec.record(
+          service.toMap(),
+          legacyId: service.id,
+          historical: appointment.status == AppointmentStatus.completed,
+        ),
+      );
     }
     await batch.commit();
-    return id;
-  }
-
-  Future<void> delete(int id) => deleteByNumericId(FirestoreCollectionNames.appointments, id);
-
-  Future<void> updateStatus(int id, AppointmentStatus status, {int? visitId}) async {
-    final doc = await docByNumericId(FirestoreCollectionNames.appointments, id);
-    await doc.update({
-      'status': status.dbValue,
-      'visit_id': visitId,
-      'updated_date': DateTime.now().toIso8601String(),
-    });
   }
 }
 
-class FirestoreExpenseRepository extends _BaseRepository {
-  FirestoreExpenseRepository(super.scope);
-
-  Stream<List<ExpenseCategory>> watchCategories() =>
-      streamCollection(FirestoreCollectionNames.expenseCategories, orderBy: 'name')
-          .map((rows) => rows.map(ExpenseCategory.fromMap).toList());
-
-  Stream<List<Expense>> watchExpenses() =>
-      streamCollection(FirestoreCollectionNames.expenses, orderBy: 'expense_date', descending: true)
-          .map((rows) => rows.map(Expense.fromMap).toList());
-
-  Future<int> saveCategory(ExpenseCategory value) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.expenseCategories,
-      fields: value.toMap(),
-      id: value.id,
-    );
-    return ((await doc.get()).data()?['id'] as num).toInt();
-  }
-
-  Future<int> saveExpense(Expense value) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.expenses,
-      fields: value.toMap(),
-      id: value.id,
-    );
-    return ((await doc.get()).data()?['id'] as num).toInt();
-  }
-
-  Future<void> deleteExpense(int id) => deleteByNumericId(FirestoreCollectionNames.expenses, id);
-}
-
-class FirestorePackageRepository extends _BaseRepository {
+class FirestorePackageRepository extends _FirestoreRepository {
   FirestorePackageRepository(super.scope);
 
-  Stream<List<Package>> watchPackages() {
-    return streamCollection(FirestoreCollectionNames.packages, orderBy: 'name')
-        .asyncMap((rows) async {
-      final packages = <Package>[];
-      for (final row in rows) {
-        final p = Package.fromMap(row);
-        final doc = scope.collection(FirestoreCollectionNames.packages).doc(row['firestore_id'] as String);
-        final services = await doc.collection('items').get();
-        p.services = services.docs
-            .map(FirestoreModelCodec.withDocumentId)
-            .map(PackageService.fromMap)
-            .toList();
-        packages.add(p);
-      }
-      return packages;
-    });
-  }
-
-  Future<int> save(Package package) async {
-    final doc = await upsert(collection: FirestoreCollectionNames.packages, fields: package.toMap(), id: package.id);
-    final saved = await doc.get();
-    final packageId = (saved.data()?['id'] as num).toInt();
-
-    final oldItems = await doc.collection('items').get();
+  Future<DocumentReference<Map<String, dynamic>>> save(Package package) async {
+    final reference = await saveMap(
+      collection: FirestoreCollectionNames.packages,
+      fields: package.toMap(),
+      legacyId: package.id,
+    );
     final batch = scope.firestore.batch();
-    for (final item in oldItems.docs) {
-      batch.delete(item.reference);
-    }
     for (final service in package.services) {
-      final ref = doc.collection('items').doc();
-      final payload = service.toMap();
-      payload['id'] ??= FirestoreModelCodec.numericId();
-      payload['package_id'] = packageId;
-      batch.set(ref, payload);
+      final childId = FirestoreModelCodec.documentId(legacyId: service.id);
+      batch.set(
+        reference.collection('items').doc(childId),
+        FirestoreModelCodec.record(service.toMap(), legacyId: service.id),
+      );
     }
     await batch.commit();
-    return packageId;
+    return reference;
   }
-
-  Future<void> delete(int id) => deleteByNumericId(FirestoreCollectionNames.packages, id);
 }
 
-class FirestoreReminderRepository extends _BaseRepository {
+class FirestoreExpenseRepository extends _FirestoreRepository {
+  FirestoreExpenseRepository(super.scope);
+
+  Future<List<ExpenseCategory>> getCategories({bool activeOnly = true}) async {
+    final rows = await listMaps(
+      collection: FirestoreCollectionNames.expenseCategories,
+      activeOnly: activeOnly ? true : null,
+      orderBy: 'name',
+    );
+    return rows.map(ExpenseCategory.fromMap).toList();
+  }
+
+  Future<DocumentReference<Map<String, dynamic>>> saveCategory(
+    ExpenseCategory category,
+  ) => saveMap(
+    collection: FirestoreCollectionNames.expenseCategories,
+    fields: category.toMap(),
+    legacyId: category.id,
+  );
+
+  Future<DocumentReference<Map<String, dynamic>>> save(Expense expense) =>
+      saveMap(
+        collection: FirestoreCollectionNames.expenses,
+        fields: expense.toMap(),
+        legacyId: expense.id,
+      );
+}
+
+class FirestoreReminderRepository extends _FirestoreRepository {
   FirestoreReminderRepository(super.scope);
 
-  Future<int> save(Reminder reminder) async {
-    final doc = await upsert(
-      collection: FirestoreCollectionNames.reminders,
-      fields: reminder.toMap(),
-      id: reminder.id,
-    );
-    return ((await doc.get()).data()?['id'] as num).toInt();
-  }
-
-  Future<List<Reminder>> getForCustomer(int customerId) async {
-    final snap = await scope
-        .collection(FirestoreCollectionNames.reminders)
-        .where('customer_id', isEqualTo: customerId)
-        .get();
-    final reminders = snap.docs
-        .map(FirestoreModelCodec.withDocumentId)
-        .map(Reminder.fromMap)
-        .toList();
-    reminders.sort((a, b) => b.reminderDate.compareTo(a.reminderDate));
-    return reminders;
-  }
+  Future<DocumentReference<Map<String, dynamic>>> save(Reminder reminder) =>
+      saveMap(
+        collection: FirestoreCollectionNames.reminders,
+        fields: reminder.toMap(),
+        legacyId: reminder.id,
+      );
 }
 
-class FirestoreSettingsRepository extends _BaseRepository {
+class FirestoreSettingsRepository extends _FirestoreRepository {
   FirestoreSettingsRepository(super.scope);
 
   Future<void> set(String key, String value) async {
@@ -663,27 +497,16 @@ class FirestoreSettingsRepository extends _BaseRepository {
       'key': key,
       'value': value,
       'schema_version': FirestoreModelCodec.schemaVersion,
-    }, SetOptions(merge: true));
-  }
-
-  Future<void> delete(String key) async {
-    await scope.collection(FirestoreCollectionNames.settings).doc(key).delete();
-  }
-
-  Stream<Map<String, String>> watchAll() {
-    return scope
-        .collection(FirestoreCollectionNames.settings)
-        .snapshots()
-        .map((snapshot) => {
-              for (final document in snapshot.docs)
-                document.id: (document.data()['value'] ?? '').toString(),
-            });
+    });
   }
 
   Future<Map<String, String>> getAll() async {
-    final snap = await scope.collection(FirestoreCollectionNames.settings).get();
+    final snapshot = await scope
+        .collection(FirestoreCollectionNames.settings)
+        .get(const GetOptions(source: Source.server));
     return {
-      for (final d in snap.docs) d.id: (d.data()['value'] ?? '').toString(),
+      for (final document in snapshot.docs)
+        document.id: (document.data()['value'] ?? '').toString(),
     };
   }
 }

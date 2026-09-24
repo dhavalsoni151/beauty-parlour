@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/settings_provider.dart';
 import '../security/pin_pad.dart';
+import 'firestore_migration_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -22,6 +23,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _phoneCtrl;
   late TextEditingController _addressCtrl;
   bool _isSaving = false;
+  late final Future<String?> _migrationRoleFuture;
 
   @override
   void initState() {
@@ -31,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _ownerNameCtrl = TextEditingController(text: s.ownerName);
     _phoneCtrl = TextEditingController(text: s.phone);
     _addressCtrl = TextEditingController(text: s.address);
+    _migrationRoleFuture = FirestoreMigrationAuthorization.currentRole();
   }
 
   @override
@@ -129,6 +132,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 16),
 
+            // Data Management
+            _buildSectionTitle('Data Management'),
+            const SizedBox(height: 10),
+            _buildCard([
+              _buildMenuTile(
+                Icons.cloud_upload_rounded, 'Backup & Restore',
+                'Backup or restore your data',
+                AppColors.info, () => context.push('/backup-restore')),
+            ]),
+            const SizedBox(height: 16),
+
+            FutureBuilder<String?>(
+              future: _migrationRoleFuture,
+              builder: (context, snapshot) {
+                if (snapshot.data == null) return const SizedBox.shrink();
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSectionTitle('Cloud Migration'),
+                    const SizedBox(height: 10),
+                    _buildCard([
+                      _buildMenuTile(
+                        Icons.cloud_sync_rounded,
+                        'Firestore Migration',
+                        'Validate and migrate the protected backup',
+                        AppColors.info,
+                        () => context.push('/firestore-migration'),
+                      ),
+                    ]),
+                    const SizedBox(height: 16),
+                  ],
+                );
+              },
+            ),
+
             // Security
             _buildSectionTitle('Security'),
             const SizedBox(height: 10),
@@ -161,7 +199,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildCard([
               _buildInfoTile('App Version', '1.0.0'),
               _buildInfoTile('Currency', '₹ Indian Rupee'),
-              _buildInfoTile('Database', 'Cloud Firestore (Offline Cache Enabled)'),
+              _buildInfoTile('Database', 'Local SQLite (Offline)'),
             ]),
             const SizedBox(height: 80),
           ],

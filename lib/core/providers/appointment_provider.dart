@@ -1,35 +1,28 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
-import '../firebase/firebase_service.dart';
-import '../firestore/firestore_repositories.dart';
+import '../database/database.dart';
 import '../models/appointment_models.dart';
 import '../models/visit_models.dart';
 import '../services/notification_service.dart';
 import '../utils/formatters.dart';
-import 'firebase_startup_provider.dart';
 
 class AppointmentProvider extends ChangeNotifier {
-  final FirestoreAppointmentRepository _repository = FirestoreAppointmentRepository(
-    FirestoreScope(
-      firestore: FirebaseService.instance.firestore,
-      organizationId: firebaseOrganizationId,
-    ),
-  );
-  final FirestoreCatalogRepository _catalogRepository = FirestoreCatalogRepository(
-    FirestoreScope(
-      firestore: FirebaseService.instance.firestore,
-      organizationId: firebaseOrganizationId,
-    ),
-  );
+  final _appointmentDao = AppointmentDao();
+  final _serviceDao = ServiceDao();
+  final _categoryDao = CategoryDao();
+  final _serviceTypeDao = ServiceTypeDao();
+  final _reportDao = ReportDao();
   final _notifications = NotificationService.instance;
 
   List<Appointment> _appointments = [];
   List<Appointment> _upcomingAppointments = [];
   bool _isLoading = false;
 
-  StreamSubscription<List<Appointment>>? _sub;
+  DateTime? _lastDateFilter;
+  String? _lastStartDate;
+  String? _lastEndDate;
+  AppointmentStatus? _lastStatusFilter;
+  int? _lastCustomerId;
 
   List<Appointment> get appointments => _appointments;
   List<Appointment> get upcomingAppointments => _upcomingAppointments;
@@ -43,52 +36,45 @@ class AppointmentProvider extends ChangeNotifier {
     AppointmentStatus? status,
   }) async {
     _isLoading = true;
+    _lastDateFilter = date;
+    _lastStartDate = startDate;
+    _lastEndDate = endDate;
+    _lastCustomerId = customerId;
+    _lastStatusFilter = status;
     notifyListeners();
 
-    await _sub?.cancel();
-    _sub = _repository.watchAppointments().listen((items) {
-      _appointments = items.where((a) {
-        if (customerId != null && a.customerId != customerId) return false;
-        if (status != null && a.status != status) return false;
-        if (date != null) {
-          final d = DateTime.tryParse(a.appointmentDate);
-          if (d == null ||
-              d.year != date.year ||
-              d.month != date.month ||
-              d.day != date.day) {
-            return false;
-          }
-        }
-        if (startDate != null && a.appointmentDate.compareTo(startDate) < 0) {
-          return false;
-        }
-        if (endDate != null && a.appointmentDate.compareTo(endDate) >= 0) {
-          return false;
-        }
-        return true;
-      }).toList();
+    try {
+      _appointments = await _appointmentDao.getAll(
+        date: date,
+        startDate: startDate,
+        endDate: endDate,
+        customerId: customerId,
+        status: status,
+      );
+    } finally {
       _isLoading = false;
       notifyListeners();
-    });
+    }
   }
 
-  Future<Appointment?> getAppointment(int id) => _repository.get(id);
+  Future<Appointment?> getAppointment(int id) => _appointmentDao.get(id);
 
   Future<List<Appointment>> getForCustomer(int customerId) =>
-      _repository.getForCustomer(customerId);
+      _appointmentDao.getForCustomer(customerId);
 
   Future<int> addAppointment(Appointment appointment,
       {List<AppointmentService> services = const []}) async {
-    final id = await _repository.save(appointment.copyWith(services: services));
+    final id = await _appointmentDao.insert(appointment, services: services);
     final saved = appointment.copyWith(id: id);
     await _notifications.scheduleAppointmentReminder(saved);
+    await _reloadCurrentLists();
     return id;
   }
 
   Future<void> updateAppointment(Appointment appointment,
       {List<AppointmentService>? services}) async {
-    await _repository.save(appointment.copyWith(services: services ?? appointment.services));
-    final refreshed = await _repository.get(appointment.id!);
+    await _appointmentDao.update(appointment, services: services);
+    final refreshed = await _appointmentDao.get(appointment.id!);
     if (refreshed != null) {
       if (refreshed.status == AppointmentStatus.pending) {
         await _notifications.scheduleAppointmentReminder(refreshed);
@@ -96,18 +82,24 @@ class AppointmentProvider extends ChangeNotifier {
         await _notifications.cancelReminder(refreshed.id!);
       }
     }
+    await _reloadCurrentLists();
   }
 
   Future<void> cancelAppointment(int id) async {
-    await _repository.updateStatus(id, AppointmentStatus.cancelled);
+    await _appointmentDao.updateStatus(id, AppointmentStatus.cancelled);
     await _notifications.cancelReminder(id);
+    await _reloadCurrentLists();
   }
 
   Future<void> markNotAttended(int id) async {
-    await _repository.updateStatus(id, AppointmentStatus.notAttended);
+    await _appointmentDao.updateStatus(id, AppointmentStatus.notAttended);
     await _notifications.cancelReminder(id);
+    await _reloadCurrentLists();
   }
 
+  /// Builds the (unsaved) visit + visit-service prefill for "Mark Completed".
+  /// The caller (New Visit screen) shows this to the user for review/edits;
+  /// nothing is written to the database until the visit is actually saved.
   Future<Visit> buildPrefillVisit(Appointment appointment) async {
     final visitDate = _appointmentDateTime(appointment).toIso8601String();
     return Visit(
@@ -154,21 +146,23 @@ class AppointmentProvider extends ChangeNotifier {
               ))
           .toList();
     }
-    if (appointment.serviceNameSnapshot.isEmpty) {
+
+    // Legacy fallback for appointments created before multi-service support.
+    if (appointment.serviceId == null &&
+        appointment.serviceNameSnapshot.isEmpty) {
       return const [];
     }
-    final services = await _catalogRepository.watchServices().first;
-    final categories = await _catalogRepository.watchCategories().first;
-    final types = await _catalogRepository.watchServiceTypes().first;
-    final service = appointment.serviceId == null
-        ? null
-        : services.where((s) => s.id == appointment.serviceId).firstOrNull;
-    final category = appointment.categoryId == null
-        ? null
-        : categories.where((c) => c.id == appointment.categoryId).firstOrNull;
-    final serviceType = appointment.serviceTypeId == null
-        ? null
-        : types.where((t) => t.id == appointment.serviceTypeId).firstOrNull;
+    final service = appointment.serviceId != null
+        ? await _serviceDao.get(appointment.serviceId!)
+        : null;
+    final category = appointment.categoryId != null
+        ? await _categoryDao.get(appointment.categoryId!)
+        : null;
+    final serviceType = appointment.serviceTypeId != null
+        ? await _serviceTypeDao.get(appointment.serviceTypeId!)
+        : null;
+    final categoryName = service?.categoryName ?? category?.name ?? '';
+    final serviceTypeName = service?.serviceTypeName ?? serviceType?.name;
     final price = service?.defaultPrice ?? 0.0;
     return [
       VisitService(
@@ -176,8 +170,8 @@ class AppointmentProvider extends ChangeNotifier {
         serviceId: appointment.serviceId,
         categoryId: appointment.categoryId,
         serviceTypeId: appointment.serviceTypeId,
-        categoryNameSnapshot: service?.categoryName ?? category?.name ?? '',
-        serviceTypeNameSnapshot: service?.serviceTypeName ?? serviceType?.name,
+        categoryNameSnapshot: categoryName,
+        serviceTypeNameSnapshot: serviceTypeName,
         serviceNameSnapshot: appointment.serviceNameSnapshot,
         price: price,
         total: price,
@@ -186,53 +180,65 @@ class AppointmentProvider extends ChangeNotifier {
     ];
   }
 
+  /// Links an already-saved visit (created from the prefilled New Visit
+  /// screen) back to its source appointment and marks it completed.
   Future<void> completeWithVisit(int appointmentId, int visitId) async {
-    final latest = await _repository.get(appointmentId);
+    final latest = await _appointmentDao.get(appointmentId);
     if (latest == null) {
       throw Exception('Appointment not found.');
     }
     if (latest.status != AppointmentStatus.pending) {
       throw Exception('Only pending appointments can be completed.');
     }
-    await _repository.updateStatus(
+    await _appointmentDao.updateStatus(
       appointmentId,
       AppointmentStatus.completed,
       visitId: visitId,
     );
     await _notifications.cancelReminder(appointmentId);
+    await _reloadCurrentLists();
   }
 
   Future<void> deleteAppointment(int id) async {
-    await _repository.delete(id);
+    await _appointmentDao.delete(id);
     await _notifications.cancelReminder(id);
+    await _reloadCurrentLists();
   }
 
   Future<void> loadUpcomingAppointments({int limit = 5}) async {
-    _upcomingAppointments = await _repository.getUpcoming(limit: limit);
+    _upcomingAppointments = await _appointmentDao.getUpcoming(limit: limit);
     notifyListeners();
   }
 
   Future<List<Appointment>> getUpcomingAppointments({int limit = 5}) async {
-    await loadUpcomingAppointments(limit: limit);
-    return _upcomingAppointments;
+    final items = await _appointmentDao.getUpcoming(limit: limit);
+    _upcomingAppointments = items;
+    notifyListeners();
+    return items;
   }
 
-  Future<bool> isSlotTaken(DateTime date, String startTime, {int? excludeId}) =>
-      _repository.isSlotTaken(date, startTime, excludeId: excludeId);
+  Future<bool> isSlotTaken(DateTime date, String startTime, {int? excludeId}) {
+    return _appointmentDao.isSlotTaken(date, startTime, excludeId: excludeId);
+  }
 
-  Future<Map<String, dynamic>> getAppointmentStats(DateRange range) async {
-    final inRange = _appointments.where((a) {
-      final d = DateTime.tryParse(a.appointmentDate);
-      if (d == null) return false;
-      return !d.isBefore(range.start) && d.isBefore(range.endExclusive);
-    }).toList();
-    return {
-      'total': inRange.length,
-      'pending': inRange.where((a) => a.status == AppointmentStatus.pending).length,
-      'completed': inRange.where((a) => a.status == AppointmentStatus.completed).length,
-      'not_attended': inRange.where((a) => a.status == AppointmentStatus.notAttended).length,
-      'cancelled': inRange.where((a) => a.status == AppointmentStatus.cancelled).length,
-    };
+  Future<Map<String, dynamic>> getAppointmentStats(DateRange range) {
+    return _reportDao.getAppointmentStats(
+      range.start.toIso8601String(),
+      range.endExclusive.toIso8601String(),
+    );
+  }
+
+  Future<void> _reloadCurrentLists() async {
+    await loadAppointments(
+      date: _lastDateFilter,
+      startDate: _lastStartDate,
+      endDate: _lastEndDate,
+      customerId: _lastCustomerId,
+      status: _lastStatusFilter,
+    );
+    await loadUpcomingAppointments(limit: _upcomingAppointments.isEmpty
+        ? 5
+        : _upcomingAppointments.length);
   }
 
   DateTime _appointmentDateTime(Appointment appointment) {
@@ -242,15 +248,4 @@ class AppointmentProvider extends ChangeNotifier {
     final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
     return DateTime(date.year, date.month, date.day, hour, minute);
   }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-}
-
-
-extension _IterableFirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }

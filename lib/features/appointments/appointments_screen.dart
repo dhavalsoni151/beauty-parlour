@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/database/daos/db_exceptions.dart';
+import '../../core/database/database.dart';
 import '../../core/models/appointment_models.dart';
 import '../../core/providers/appointment_provider.dart';
 import '../../core/theme/app_theme.dart';

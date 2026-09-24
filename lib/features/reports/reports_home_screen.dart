@@ -646,7 +646,7 @@ class _ServiceTypeDrillScreenState extends State<_ServiceTypeDrillScreen> {
     _types = await _reportDao.getTopServiceTypes(
       widget.startDate,
       widget.endDate,
-      widget.categoryName,
+      categoryName: widget.categoryName,
       sort: _sort,
     );
     if (mounted) setState(() => _loading = false);

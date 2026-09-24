@@ -26,6 +26,8 @@ import 'features/packages/packages_screen.dart';
 import 'features/packages/package_form_screen.dart';
 import 'features/reminders/reminders_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'features/settings/backup_restore_screen.dart';
+import 'features/settings/firestore_migration_screen.dart';
 import 'shared/widgets/main_scaffold.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/auth/startup_gate.dart';
@@ -159,6 +161,16 @@ final GoRouter _router = GoRouter(
       path: '/settings',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (c, s) => const SettingsScreen(),
+    ),
+    GoRoute(
+      path: '/backup-restore',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const BackupRestoreScreen(),
+    ),
+    GoRoute(
+      path: '/firestore-migration',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (c, s) => const FirestoreMigrationScreen(),
     ),
     GoRoute(
       path: '/packages',

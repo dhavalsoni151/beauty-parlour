@@ -1,31 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart' hide Category;
-
-import '../database/daos/db_exceptions.dart';
-import '../firebase/firebase_service.dart';
-import '../firestore/firestore_repositories.dart';
+import '../database/database.dart';
 import '../models/customer_models.dart';
-import 'firebase_startup_provider.dart';
 
 class CategoryProvider extends ChangeNotifier {
-  final FirestoreCatalogRepository _repository = FirestoreCatalogRepository(
-    FirestoreScope(
-      firestore: FirebaseService.instance.firestore,
-      organizationId: firebaseOrganizationId,
-    ),
-  );
+  final _categoryDao = CategoryDao();
+  final _serviceTypeDao = ServiceTypeDao();
 
   List<Category> _categories = [];
   bool _isLoading = false;
 
+  // Service types for the currently-inspected category.
   final Map<int, List<ServiceType>> _serviceTypesByCategory = {};
-  List<ServiceType> _allServiceTypes = [];
-  List<Service> _allServices = [];
-
-  StreamSubscription<List<Category>>? _categorySub;
-  StreamSubscription<List<ServiceType>>? _serviceTypeSub;
-  StreamSubscription<List<Service>>? _servicesSub;
 
   List<Category> get categories => _categories;
   List<Category> get activeCategories =>
@@ -35,114 +20,92 @@ class CategoryProvider extends ChangeNotifier {
   Future<void> loadCategories() async {
     _isLoading = true;
     notifyListeners();
-    await _categorySub?.cancel();
-    await _serviceTypeSub?.cancel();
-    await _servicesSub?.cancel();
-
-    _categorySub = _repository.watchCategories().listen((items) {
-      _categories = items;
-      _isLoading = false;
-      notifyListeners();
-    });
-
-    _serviceTypeSub = _repository.watchServiceTypes().listen((items) {
-      _allServiceTypes = items;
-      _serviceTypesByCategory
-        ..clear()
-        ..addEntries(_groupServiceTypes(items).entries);
-      notifyListeners();
-    });
-
-    _servicesSub = _repository.watchServices().listen((items) {
-      _allServices = items;
-    });
+    _categories = await _categoryDao.getAll();
+    _isLoading = false;
+    notifyListeners();
   }
 
-  Map<int, List<ServiceType>> _groupServiceTypes(List<ServiceType> items) {
-    final map = <int, List<ServiceType>>{};
-    for (final type in items) {
-      map.putIfAbsent(type.categoryId, () => []).add(type);
-    }
-    return map;
+  Future<void> addCategory(Category category) async {
+    await _categoryDao.insert(category);
+    await loadCategories();
   }
 
-  Future<void> addCategory(Category category) => _repository.saveCategory(category);
+  Future<void> updateCategory(Category category) async {
+    await _categoryDao.update(category);
+    await loadCategories();
+  }
 
-  Future<void> updateCategory(Category category) =>
-      _repository.saveCategory(category);
+  Future<void> toggleActive(Category category) async {
+    await _categoryDao.update(category.copyWith(isActive: !category.isActive));
+    await loadCategories();
+  }
 
-  Future<void> toggleActive(Category category) =>
-      _repository.saveCategory(category.copyWith(isActive: !category.isActive));
-
+  /// Deletes a category. Throws [InUseException] (via the DAO) if the
+  /// category still has service types/services/visit history attached.
   Future<void> deleteCategory(Category category) async {
-    if (_allServiceTypes.any((t) => t.categoryId == category.id) ||
-        _allServices.any((s) => s.categoryId == category.id)) {
-      throw const InUseException('Category has dependent service data attached.');
-    }
-    await _repository.deleteCategory(category.id!);
+    await _categoryDao.delete(category.id!);
+    await loadCategories();
   }
 
   Future<void> updateDisplayOrder(int id, int displayOrder) async {
-    final current = _categories.firstWhere((c) => c.id == id);
-    await _repository.saveCategory(current.copyWith(displayOrder: displayOrder));
+    await _categoryDao.updateDisplayOrder(id, displayOrder);
+    await loadCategories();
   }
 
+  /// True if an active category with [name] already exists.
   Future<bool> categoryNameExists(String name, {int? excludeId}) =>
-      _repository.categoryNameExists(name, excludeId: excludeId);
+      _categoryDao.nameExists(name, excludeId: excludeId);
+
+  // ── Service types ─────────────────────────────────────────────────────────
 
   List<ServiceType> serviceTypesFor(int categoryId) =>
       _serviceTypesByCategory[categoryId] ?? const [];
 
   Future<List<ServiceType>> loadServiceTypes(int categoryId,
       {bool activeOnly = false}) async {
-    final items = serviceTypesFor(categoryId)
-        .where((s) => !activeOnly || s.isActive)
-        .toList();
-    return items;
+    final types =
+        await _serviceTypeDao.getForCategory(categoryId, activeOnly: activeOnly);
+    _serviceTypesByCategory[categoryId] = types;
+    notifyListeners();
+    return types;
   }
 
-  Future<List<ServiceType>> getServiceTypesForCategory(int categoryId) async {
-    return serviceTypesFor(categoryId).where((s) => s.isActive).toList();
+  Future<List<ServiceType>> getServiceTypesForCategory(int categoryId) =>
+      _serviceTypeDao.getForCategory(categoryId, activeOnly: true);
+
+  Future<void> addServiceType(ServiceType type) async {
+    await _serviceTypeDao.insert(type);
+    await loadServiceTypes(type.categoryId);
   }
 
-  Future<void> addServiceType(ServiceType type) => _repository.saveServiceType(type);
+  Future<void> updateServiceType(ServiceType type) async {
+    await _serviceTypeDao.update(type);
+    await loadServiceTypes(type.categoryId);
+  }
 
-  Future<void> updateServiceType(ServiceType type) =>
-      _repository.saveServiceType(type);
+  Future<void> toggleServiceTypeActive(ServiceType type) async {
+    await _serviceTypeDao.update(type.copyWith(isActive: !type.isActive));
+    await loadServiceTypes(type.categoryId);
+  }
 
-  Future<void> toggleServiceTypeActive(ServiceType type) =>
-      _repository.saveServiceType(type.copyWith(isActive: !type.isActive));
-
-  Future<void> deleteServiceType(ServiceType type) =>
-      _repository.deleteServiceType(type.id!);
+  Future<void> deleteServiceType(ServiceType type) async {
+    await _serviceTypeDao.delete(type.id!);
+    await loadServiceTypes(type.categoryId);
+  }
 
   Future<bool> serviceTypeNameExists(int categoryId, String name,
           {int? excludeId}) =>
-      _repository.serviceTypeNameExists(categoryId, name, excludeId: excludeId);
-
-  @override
-  void dispose() {
-    _categorySub?.cancel();
-    _serviceTypeSub?.cancel();
-    _servicesSub?.cancel();
-    super.dispose();
-  }
+      _serviceTypeDao.nameExists(categoryId, name, excludeId: excludeId);
 }
 
 class ServiceProvider extends ChangeNotifier {
-  final FirestoreCatalogRepository _repository = FirestoreCatalogRepository(
-    FirestoreScope(
-      firestore: FirebaseService.instance.firestore,
-      organizationId: firebaseOrganizationId,
-    ),
-  );
+  final _serviceDao = ServiceDao();
 
   List<Service> _services = [];
   List<Service> _filteredServices = [];
   bool _isLoading = false;
   String _searchQuery = '';
   int? _selectedCategoryId;
-  StreamSubscription<List<Service>>? _sub;
 
   List<Service> get services => _filteredServices;
   List<Service> get allServices => _services;
@@ -152,26 +115,21 @@ class ServiceProvider extends ChangeNotifier {
   Future<void> loadServices({int? categoryId}) async {
     _isLoading = true;
     notifyListeners();
-    await _sub?.cancel();
-    _sub = _repository.watchServices().listen((items) {
-      _services = items;
-      if (categoryId != null) {
-        _selectedCategoryId = categoryId;
-      }
-      _applyFilter();
-      _isLoading = false;
-      notifyListeners();
-    });
+    _services =
+        await _serviceDao.getServices(categoryId: categoryId, activeOnly: false);
+    _applyFilter();
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<List<Service>> getServicesForCategory(int categoryId,
       {int? serviceTypeId, bool onlyDirect = false}) async {
-    return _services.where((s) {
-      if (s.categoryId != categoryId || !s.isActive) return false;
-      if (serviceTypeId != null) return s.serviceTypeId == serviceTypeId;
-      if (onlyDirect) return s.serviceTypeId == null;
-      return true;
-    }).toList();
+    return _serviceDao.getServices(
+      categoryId: categoryId,
+      serviceTypeId: serviceTypeId,
+      onlyDirect: onlyDirect,
+      activeOnly: true,
+    );
   }
 
   void filterByCategory(int? categoryId) {
@@ -203,27 +161,33 @@ class ServiceProvider extends ChangeNotifier {
     _filteredServices = list;
   }
 
-  Future<void> addService(Service service) => _repository.saveService(service);
+  Future<void> addService(Service service) async {
+    await _serviceDao.insert(service);
+    await loadServices();
+  }
 
-  Future<void> updateService(Service service) => _repository.saveService(service);
+  Future<void> updateService(Service service) async {
+    await _serviceDao.update(service);
+    await loadServices();
+  }
 
-  Future<void> toggleActive(Service service) =>
-      _repository.saveService(service.copyWith(isActive: !service.isActive));
+  Future<void> toggleActive(Service service) async {
+    await _serviceDao.update(service.copyWith(isActive: !service.isActive));
+    await loadServices();
+  }
 
-  Future<void> toggleFavorite(Service service) =>
-      _repository.saveService(service.copyWith(isFavorite: !service.isFavorite));
+  Future<void> toggleFavorite(Service service) async {
+    await _serviceDao.setFavorite(service.id!, !service.isFavorite);
+    await loadServices();
+  }
 
-  Future<void> deleteService(Service service) =>
-      _repository.deleteService(service.id!);
+  Future<void> deleteService(Service service) async {
+    await _serviceDao.delete(service.id!);
+    await loadServices();
+  }
 
   Future<bool> serviceNameExists(
           int categoryId, int? serviceTypeId, String name, {int? excludeId}) =>
-      _repository.serviceNameExists(categoryId, serviceTypeId, name,
+      _serviceDao.nameExists(categoryId, serviceTypeId, name,
           excludeId: excludeId);
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
 }

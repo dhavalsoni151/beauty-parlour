@@ -195,6 +195,7 @@ class _MoreNavItem extends StatelessWidget {
       ('Expenses', Icons.receipt_long_rounded, '/expenses', AppColors.warning),
       ('Pending', Icons.pending_actions_rounded, '/pending-payments', AppColors.error),
       ('Settings', Icons.settings_rounded, '/settings', AppColors.textSecondary),
+      ('Backup', Icons.cloud_upload_rounded, '/backup-restore', AppColors.info),
     ];
     return GridView.count(
       shrinkWrap: true,

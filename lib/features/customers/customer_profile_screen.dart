@@ -4,10 +4,10 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/customer_provider.dart';
 import '../../core/providers/visit_provider.dart';
-import '../../core/providers/reminder_provider.dart';
 import '../../core/models/customer_models.dart';
 import '../../core/models/reminder_models.dart';
 import '../../core/models/visit_models.dart';
+import '../../core/database/daos/reminder_dao.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_widgets.dart';
 
@@ -41,7 +41,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     for (final v in _visits) {
       v.services = await context.read<VisitProvider>().getVisit(v.id!).then((full) => full?.services ?? []);
     }
-    _reminders = await context.read<ReminderProvider>().getForCustomer(widget.customerId);
+    _reminders = await ReminderDao().getForCustomer(widget.customerId);
     if (mounted) setState(() => _isLoading = false);
   }
 

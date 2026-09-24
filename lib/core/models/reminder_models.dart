@@ -182,20 +182,3 @@ class CustomerInfo {
 
   const CustomerInfo({required this.id, required this.name, this.phone});
 }
-
-enum ReminderSort { daysDesc, dateAsc, amountDesc, nameAsc }
-
-extension ReminderSortLabel on ReminderSort {
-  String get label {
-    switch (this) {
-      case ReminderSort.daysDesc:
-        return 'Days (High → Low)';
-      case ReminderSort.dateAsc:
-        return 'Visit Date (Oldest First)';
-      case ReminderSort.amountDesc:
-        return 'Bill Amount (High → Low)';
-      case ReminderSort.nameAsc:
-        return 'Customer Name (A-Z)';
-    }
-  }
-}

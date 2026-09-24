@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app.dart';
+import 'core/database/database.dart';
 import 'core/providers/customer_provider.dart';
 import 'core/providers/category_provider.dart';
 import 'core/providers/visit_provider.dart';
@@ -60,9 +61,9 @@ void main() async {
   );
 }
 
-/// Gates the single [BeautyParlourApp] instance: app services +
-/// providers initialize (once) only after Firebase startup is ready,
-/// without ever swapping MaterialApp.
+/// Gates the single [BeautyParlourApp] instance: local database +
+/// notifications initialize (once) only after Firebase startup is ready,
+/// and business data loads right after — without ever swapping MaterialApp.
 class _StartupRoot extends StatefulWidget {
   const _StartupRoot();
 
@@ -74,6 +75,7 @@ class _StartupRootState extends State<_StartupRoot> {
   Future<void>? _localInitialization;
 
   Future<void> _initializeLocal(BuildContext context) async {
+    await AppDatabase.instance.database;
     await NotificationService.instance.initialize();
     if (!context.mounted) return;
     await context.read<SettingsProvider>().loadSettings();
