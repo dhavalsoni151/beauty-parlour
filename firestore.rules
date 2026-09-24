@@ -24,6 +24,14 @@ service cloud.firestore {
       return memberOf(orgId) && roleOf(orgId) in ['owner', 'admin', 'staff'];
     }
 
+    // Full data-reset/import capability (deletes otherwise-immutable
+    // historical records such as visits/payments/packages) is restricted to
+    // the organization owner only, and used exclusively by the app's
+    // "Clear All Data" / restore-from-backup feature.
+    function ownerOnly(orgId) {
+      return memberOf(orgId) && roleOf(orgId) == 'owner';
+    }
+
     function historicalCreateOnly() {
       return request.resource.data.record_type == 'historical_transaction'
         && request.resource.data._migration_fingerprint is string
@@ -75,11 +83,11 @@ service cloud.firestore {
       match /packages/{documentId} {
         allow read: if memberOf(orgId);
         allow create, update: if ownerOrAdmin(orgId);
-        allow delete: if false;
+        allow delete: if ownerOnly(orgId);
         match /items/{itemId} {
           allow read: if memberOf(orgId);
           allow create, update: if ownerOrAdmin(orgId);
-          allow delete: if false;
+          allow delete: if ownerOnly(orgId);
         }
       }
 
@@ -104,21 +112,24 @@ service cloud.firestore {
         allow read: if memberOf(orgId);
         allow create: if staffOrAbove(orgId) && historicalCreateOnly();
         allow update: if staffOrAbove(orgId) && mutableRecord();
-        allow delete: if false;
+        allow delete: if ownerOnly(orgId);
         match /items/{itemId} {
           allow read: if memberOf(orgId);
           allow create: if staffOrAbove(orgId) && historicalCreateOnly();
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if ownerOnly(orgId);
         }
         match /payments/{paymentId} {
           allow read: if memberOf(orgId);
           allow create: if staffOrAbove(orgId) && historicalCreateOnly();
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if ownerOnly(orgId);
         }
         match /writeOffs/{writeOffId} {
           allow read: if memberOf(orgId);
           allow create: if ownerOrAdmin(orgId) && historicalCreateOnly();
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if ownerOnly(orgId);
         }
       }
 
